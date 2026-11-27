@@ -43,10 +43,10 @@ class RearScreen(
                 val available = status == WindowAreaCapability.Status.WINDOW_AREA_STATUS_AVAILABLE
                 onStatus(
                     when {
-                        session != null -> "Cover screen: trackpad running"
-                        areas.isEmpty() || rear == null -> "Cover screen: not available on this phone"
-                        available -> "Cover screen: ready"
-                        else -> "Cover screen: unfold the phone (status: $status)"
+                        session != null -> "Running on the cover screen"
+                        areas.isEmpty() || rear == null -> "This phone doesn't support cover screen mode"
+                        available -> "Ready - tap Start"
+                        else -> "Unfold your phone to start"
                     }
                 )
                 if (available && session == null && !autoStarted && autoStart()) {
@@ -59,7 +59,7 @@ class RearScreen(
 
     fun toggle() {
         session?.let { it.close(); return }
-        val area = rear ?: run { onStatus("Cover screen API: no rear screen available"); return }
+        val area = rear ?: run { onStatus("Unfold your phone to start"); return }
         try {
             controller.presentContentOnWindowArea(
                 area.token, activity, activity.mainExecutor,
@@ -67,19 +67,19 @@ class RearScreen(
                     override fun onSessionStarted(s: WindowAreaSessionPresenter) {
                         session = s
                         s.setContentView(TrackpadView(s.context))
-                        onStatus("Trackpad is on the cover screen")
+                        onStatus("Running on the cover screen")
                     }
                     override fun onSessionEnded(t: Throwable?) {
                         session = null
-                        onStatus("Cover screen session ended" + (t?.let { ": ${it.message}" } ?: ""))
+                        onStatus(if (t == null) "Stopped" else "Stopped: ${t.message}")
                     }
                     override fun onContainerVisibilityChanged(isVisible: Boolean) {
-                        onStatus("Cover screen content visible = $isVisible")
+                        if (!isVisible) onStatus("Cover screen is off - unfold your phone")
                     }
                 }
             )
         } catch (t: Throwable) {
-            onStatus("Cover screen API failed: ${t.javaClass.simpleName}: ${t.message}")
+            onStatus("Couldn't start: ${t.message ?: t.javaClass.simpleName}")
         }
     }
 

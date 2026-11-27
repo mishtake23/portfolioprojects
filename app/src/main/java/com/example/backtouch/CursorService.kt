@@ -3,6 +3,7 @@ package com.example.backtouch
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
@@ -53,6 +54,8 @@ class CursorService : AccessibilityService() {
     val isDragging get() = fingerDown && followCursor
 
     var autoHide = true
+    private lateinit var prefs: Prefs
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> applyPrefs() }
 
     private val hideRunnable = Runnable {
         pointer?.animate()?.alpha(0f)?.setDuration(250)?.start()
@@ -64,10 +67,13 @@ class CursorService : AccessibilityService() {
         refreshBounds()
         x = w / 2f; y = h / 2f
 
+        prefs = Prefs(this)
+        autoHide = prefs.autoHideCursor
         val d = resources.displayMetrics.density
         val root = FrameLayout(this)
         val p = PointerView(this, d)
-        root.addView(p, FrameLayout.LayoutParams((22 * d).toInt(), (30 * d).toInt()))
+        val (pw, ph) = p.sizeFor(pointerScale())
+        root.addView(p, FrameLayout.LayoutParams(pw, ph))
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -85,6 +91,18 @@ class CursorService : AccessibilityService() {
         pointer = p
         wm.addView(root, lp)
         root.post { place() }
+        prefs.listen(prefListener)
+    }
+
+    private fun pointerScale() = when (prefs.pointerSize) { 0 -> 0.85f; 1 -> 1.1f; else -> 1.4f }
+
+    private fun applyPrefs() {
+        autoHide = prefs.autoHideCursor
+        val p = pointer ?: return
+        val (pw, ph) = p.sizeFor(pointerScale())
+        p.layoutParams = p.layoutParams.apply { width = pw; height = ph }
+        p.post { place() }
+        wake()
     }
 
     /** Screen size changes when the phone is folded / unfolded. */
@@ -271,6 +289,7 @@ class CursorService : AccessibilityService() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        if (::prefs.isInitialized) prefs.unlisten(prefListener)
         overlay?.let { runCatching { wm.removeView(it) } }
         overlay = null
         pointer = null
@@ -285,37 +304,62 @@ class CursorService : AccessibilityService() {
     }
 }
 
-/** Classic arrow mouse pointer; turns blue while dragging. */
+/** Small white arrow with a dark outline and soft shadow, like the Samsung DeX pointer. */
 private class PointerView(ctx: Context, private val d: Float) : View(ctx) {
-    val tipX = 2 * d
-    val tipY = 2 * d
+    private var s = d * 0.85f
+    val tipX get() = PAD * s
+    val tipY get() = PAD * s
 
     var dragging = false
         set(v) { field = v; invalidate() }
 
-    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 1.5f * d
+        color = Color.rgb(20, 20, 20)
+        style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
     }
     private val arrow = Path()
 
+    init { setLayerType(LAYER_TYPE_SOFTWARE, null) } // needed for the shadow
+
+    /** Sets the scale and returns the view size in pixels. */
+    fun sizeFor(scale: Float): Pair<Int, Int> {
+        s = d * scale
+        return ((W + 2 * PAD) * s).toInt() to ((H + 2 * PAD) * s).toInt()
+    }
+
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-        val s = d
+        // Arrow outline in "pointer units" (tip at 0,0), offset by PAD for outline + shadow.
+        val pts = floatArrayOf(
+            0f, 0f,
+            0f, 16.5f,
+            3.9f, 12.9f,
+            6.4f, 18.6f,
+            8.9f, 17.5f,
+            6.4f, 11.9f,
+            11.6f, 11.9f
+        )
         arrow.reset()
-        arrow.moveTo(2 * s, 2 * s)
-        arrow.lineTo(2 * s, 24 * s)
-        arrow.lineTo(7.5f * s, 18.5f * s)
-        arrow.lineTo(11.5f * s, 27 * s)
-        arrow.lineTo(15 * s, 25.5f * s)
-        arrow.lineTo(11 * s, 17.5f * s)
-        arrow.lineTo(18.5f * s, 17.5f * s)
+        for (i in pts.indices step 2) {
+            val px = (pts[i] + PAD) * s; val py = (pts[i + 1] + PAD) * s
+            if (i == 0) arrow.moveTo(px, py) else arrow.lineTo(px, py)
+        }
         arrow.close()
+        outline.strokeWidth = 1.1f * s
+        fill.setShadowLayer(1.6f * s, 0f, 0.8f * s, Color.argb(110, 0, 0, 0))
     }
 
     override fun onDraw(c: Canvas) {
-        fill.color = if (dragging) Color.rgb(90, 180, 255) else Color.WHITE
+        fill.color = if (dragging) Color.rgb(120, 190, 255) else Color.WHITE
         c.drawPath(arrow, fill)
         c.drawPath(arrow, outline)
+    }
+
+    companion object {
+        private const val W = 12f
+        private const val H = 19f
+        private const val PAD = 3f
     }
 }

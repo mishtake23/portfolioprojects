@@ -1,6 +1,7 @@
 package com.example.backtouch
 
 import android.content.Context
+import android.content.SharedPreferences
 
 /** User settings, shared by the setup screen, the trackpad and the cursor service. */
 class Prefs(ctx: Context) {
@@ -33,6 +34,15 @@ class Prefs(ctx: Context) {
 
     /** Back / Home / Recents buttons along the bottom of the trackpad. */
     var showNavBar: Boolean get() = b("showNavBar", true); set(v) = putB("showNavBar", v)
+
+    /** 0 = small (default, DeX-like), 1 = medium, 2 = large. */
+    var pointerSize: Int get() = p.getInt("pointerSize", 0); set(v) = p.edit().putInt("pointerSize", v).apply()
+
+    fun listen(l: SharedPreferences.OnSharedPreferenceChangeListener) =
+        p.registerOnSharedPreferenceChangeListener(l)
+
+    fun unlisten(l: SharedPreferences.OnSharedPreferenceChangeListener) =
+        p.unregisterOnSharedPreferenceChangeListener(l)
 
     /** Fade the cursor out after a few seconds without movement. */
     var autoHideCursor: Boolean get() = b("autoHideCursor", true); set(v) = putB("autoHideCursor", v)
