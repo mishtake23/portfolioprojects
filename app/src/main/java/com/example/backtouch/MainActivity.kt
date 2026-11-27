@@ -1,9 +1,9 @@
 package com.example.backtouch
 
 import android.app.Activity
-import android.app.ActivityOptions
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
-import android.hardware.display.DisplayManager
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
@@ -14,26 +14,35 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 
-/** Setup + diagnostics: lists displays and launches the trackpad on a chosen one. */
+/** Setup screen: turn the service on, start the cover-screen trackpad, tune settings. */
 class MainActivity : Activity() {
     private lateinit var root: LinearLayout
-    private lateinit var status: TextView
     private lateinit var rear: RearScreen
-    private var rearStatus = "Cover screen API: checking..."
+    private lateinit var prefs: Prefs
+    private var rearStatus = "Cover screen: checking..."
     private var rearView: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        prefs = Prefs(this)
         root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(48, 96, 48, 48)
+            setPadding(48, 96, 48, 64)
         }
         setContentView(ScrollView(this).apply { addView(root) })
-        rear = RearScreen(this) { msg ->
+        rear = RearScreen(this, { msg ->
             rearStatus = msg
             rearView?.text = msg
-        }
+        }, autoStart = { prefs.autoStartCover && CursorService.instance != null })
         rear.start()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AutoEnable.tryEnable(this)
+        render()
+        // The service may take a moment to come up after auto-enable.
+        root.postDelayed({ if (!isFinishing) render() }, 800)
     }
 
     override fun onDestroy() {
@@ -41,92 +50,111 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    override fun onResume() {
-        super.onResume()
-        render()
-    }
-
     private fun render() {
         root.removeAllViews()
-        status = TextView(this).apply { textSize = 15f }
-        root.addView(status)
+        val running = CursorService.instance != null
+        val auto = AutoEnable.hasPermission(this)
 
-        root.addView(button("1. Enable accessibility service") {
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        })
-
-        val dm = getSystemService(DISPLAY_SERVICE) as DisplayManager
-        val displays = dm.displays
-        val sb = StringBuilder()
-        sb.append("Accessibility service: ")
-            .append(if (CursorService.instance != null) "ON" else "OFF").append("\n\nDisplays:\n")
-        for (d in displays) {
-            sb.append("  id=${d.displayId}  \"${d.name}\"  state=${d.state}  ${d.width}x${d.height}\n")
-        }
-        status.text = sb.toString()
-
-        rearView = TextView(this).apply { text = rearStatus; setPadding(0, 24, 0, 0) }
-        root.addView(rearView)
-        root.addView(button("2. Trackpad on cover screen (phone unfolded)") { rear.toggle() })
-
-        root.addView(button("Test trackpad on THIS screen") {
-            startActivity(Intent(this, TrackpadActivity::class.java))
-        })
-        for (d in displays.filter { it.displayId != android.view.Display.DEFAULT_DISPLAY }) {
-            root.addView(button("Open trackpad on display ${d.displayId} (${d.name})") {
-                launchOn(d.displayId)
+        header("Step 1 - Accessibility service")
+        text(
+            if (running) "ON" else "OFF" +
+                if (auto) " (turning on automatically...)" else " - turn it on below"
+        )
+        if (!running) {
+            root.addView(button("Open accessibility settings") {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
             })
         }
-        addSettings()
-
-        root.addView(TextView(this).apply {
-            textSize = 13f
-            setPadding(0, 32, 0, 0)
-            text = "Unfold the phone, open this app, then press button 2. " +
-                "Note what the 'Cover screen API' line says and what happens on the cover screen."
-        })
-    }
-
-    private fun launchOn(displayId: Int) {
-        try {
-            val opts = ActivityOptions.makeBasic().setLaunchDisplayId(displayId)
-            startActivity(
-                Intent(this, TrackpadActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK),
-                opts.toBundle()
+        if (auto) {
+            small("Auto-enable is active: BackTouch switches itself back on after updates and reboots.")
+        } else {
+            small(
+                "Tip: to skip this step forever (also after app updates and reboots), run this " +
+                    "once over ADB, or in a Shizuku shell app:\n\n${AutoEnable.GRANT_COMMAND}"
             )
-        } catch (t: Throwable) {
-            Toast.makeText(this, "Launch failed: ${t.javaClass.simpleName}: ${t.message}", Toast.LENGTH_LONG).show()
+            root.addView(button("Copy command") {
+                val cm = getSystemService(ClipboardManager::class.java)
+                cm.setPrimaryClip(ClipData.newPlainText("adb", AutoEnable.GRANT_COMMAND))
+                Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+            })
         }
+
+        header("Step 2 - Trackpad on the cover screen")
+        rearView = text(rearStatus)
+        root.addView(button(if (rear.isPresenting) "Stop cover trackpad" else "Start cover trackpad (unfolded)") {
+            rear.toggle()
+            root.postDelayed({ if (!isFinishing) render() }, 300)
+        })
+        switch("Start automatically when BackTouch opens unfolded", prefs.autoStartCover) {
+            prefs.autoStartCover = it
+        }
+        root.addView(button("Test trackpad on this screen") {
+            startActivity(Intent(this, TrackpadActivity::class.java))
+        })
+
+        header("Pointer")
+        slider("Speed", 5, 40, (prefs.sensitivity * 10).toInt(), { "%.1f".format(it / 10f) }) {
+            prefs.sensitivity = it / 10f
+        }
+        slider("Acceleration", 0, 20, (prefs.acceleration * 10).toInt(), { "%.1f".format(it / 10f) }) {
+            prefs.acceleration = it / 10f
+        }
+        switch("Mirror left/right (using it from behind)", prefs.mirrorX) { prefs.mirrorX = it }
+        switch("Hide pointer when idle", prefs.autoHideCursor) { prefs.autoHideCursor = it }
+
+        header("Scrolling")
+        slider("Scroll speed", 5, 40, (prefs.scrollSpeed * 10).toInt(), { "%.1f".format(it / 10f) }) {
+            prefs.scrollSpeed = it / 10f
+        }
+        switch("Invert scroll direction", prefs.invertScroll) { prefs.invertScroll = it }
+
+        header("Feel")
+        slider("Vibration", 0, 3, prefs.haptics, { listOf("Off", "Light", "Medium", "Strong")[it] }) {
+            prefs.haptics = it
+            Haptics(this).apply { level = it }.click()
+        }
+        slider("Ignore edges (palm rejection)", 0, 15, prefs.edgePct, { "$it%" }) { prefs.edgePct = it }
+        switch("Back / Home / Recents bar on the trackpad", prefs.showNavBar) { prefs.showNavBar = it }
+
+        header("Gestures")
+        small(
+            "Move 1 finger - pointer\n" +
+                "Tap - click\n" +
+                "Tap twice - double click\n" +
+                "Hold (vibrates) then move - drag\n" +
+                "Hold and release - long press\n" +
+                "2-finger tap - long press (right click)\n" +
+                "2 fingers - scroll (flings like a real swipe)\n" +
+                "3-finger swipe up - Home\n" +
+                "3-finger swipe left - Back\n" +
+                "3-finger swipe right - Recent apps\n" +
+                "3-finger swipe down - Notifications\n" +
+                "3-finger tap - pause / resume"
+        )
     }
 
-    private fun addSettings() {
-        val st = Settings(this)
-        root.addView(TextView(this).apply {
-            text = "\nSettings"; textSize = 18f
-        })
-        slider("Sensitivity", 5, 40, (st.sensitivity * 10).toInt(), { "%.1f".format(it / 10f) }) {
-            st.sensitivity = it / 10f
-        }
-        slider("Acceleration", 0, 20, (st.acceleration * 10).toInt(), { "%.1f".format(it / 10f) }) {
-            st.acceleration = it / 10f
-        }
-        slider("Ignore edges (palm rejection)", 0, 15, st.edgePct, { "$it%" }) {
-            st.edgePct = it
-        }
+    // ---- tiny view helpers ----
+
+    private fun header(t: String) = root.addView(TextView(this).apply {
+        text = t; textSize = 18f; setPadding(0, 48, 0, 8)
+    })
+
+    private fun text(t: String) = TextView(this).apply { text = t; textSize = 15f }.also { root.addView(it) }
+
+    private fun small(t: String) = root.addView(TextView(this).apply {
+        text = t; textSize = 13f; setPadding(0, 12, 0, 12); setTextIsSelectable(true)
+    })
+
+    private fun button(label: String, onClick: () -> Unit) =
+        Button(this).apply { text = label; setOnClickListener { onClick() } }
+
+    private fun switch(label: String, value: Boolean, onChange: (Boolean) -> Unit) =
         root.addView(Switch(this).apply {
-            text = "Invert scroll direction"
-            isChecked = st.invertScroll
-            setOnCheckedChangeListener { _, on -> st.invertScroll = on }
+            text = label
+            isChecked = value
+            setPadding(0, 16, 0, 16)
+            setOnCheckedChangeListener { _, on -> onChange(on) }
         })
-        root.addView(TextView(this).apply {
-            textSize = 13f
-            setPadding(0, 16, 0, 0)
-            text = "Gestures: move = cursor, tap = click, hold then move = drag, " +
-                "hold = long press, 2 fingers = scroll, 2-finger tap = long press, " +
-                "3-finger tap = pause."
-        })
-    }
 
     private fun slider(
         label: String, min: Int, max: Int, value: Int,
@@ -149,7 +177,4 @@ class MainActivity : Activity() {
         root.addView(title)
         root.addView(bar)
     }
-
-    private fun button(label: String, onClick: () -> Unit) =
-        Button(this).apply { text = label; setOnClickListener { onClick() } }
 }

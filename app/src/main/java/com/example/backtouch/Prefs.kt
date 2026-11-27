@@ -1,0 +1,42 @@
+package com.example.backtouch
+
+import android.content.Context
+
+/** User settings, shared by the setup screen, the trackpad and the cursor service. */
+class Prefs(ctx: Context) {
+    private val p = ctx.applicationContext.getSharedPreferences("backtouch", Context.MODE_PRIVATE)
+
+    private fun f(key: String, def: Float) = p.getFloat(key, def)
+    private fun putF(key: String, v: Float) = p.edit().putFloat(key, v).apply()
+    private fun b(key: String, def: Boolean) = p.getBoolean(key, def)
+    private fun putB(key: String, v: Boolean) = p.edit().putBoolean(key, v).apply()
+
+    /** Base cursor speed multiplier. */
+    var sensitivity: Float get() = f("sensitivity", 1.8f); set(v) = putF("sensitivity", v)
+
+    /** Extra speed for fast swipes (0 = linear). */
+    var acceleration: Float get() = f("acceleration", 0.6f); set(v) = putF("acceleration", v)
+
+    /** How far content scrolls per finger movement. */
+    var scrollSpeed: Float get() = f("scrollSpeed", 1.6f); set(v) = putF("scrollSpeed", v)
+
+    /** Touches that START within this % of any edge are ignored (fingers gripping the phone). */
+    var edgePct: Int get() = p.getInt("edgePct", 6); set(v) = p.edit().putInt("edgePct", v).apply()
+
+    /** Flip left/right, because the cover screen faces away from you when used from behind. */
+    var mirrorX: Boolean get() = b("mirrorX", true); set(v) = putB("mirrorX", v)
+
+    var invertScroll: Boolean get() = b("invertScroll", false); set(v) = putB("invertScroll", v)
+
+    /** 0 = off, 1 = light, 2 = medium, 3 = strong. */
+    var haptics: Int get() = p.getInt("haptics", 2); set(v) = p.edit().putInt("haptics", v).apply()
+
+    /** Back / Home / Recents buttons along the bottom of the trackpad. */
+    var showNavBar: Boolean get() = b("showNavBar", true); set(v) = putB("showNavBar", v)
+
+    /** Fade the cursor out after a few seconds without movement. */
+    var autoHideCursor: Boolean get() = b("autoHideCursor", true); set(v) = putB("autoHideCursor", v)
+
+    /** Put the trackpad on the cover screen as soon as the app is opened unfolded. */
+    var autoStartCover: Boolean get() = b("autoStartCover", false); set(v) = putB("autoStartCover", v)
+}

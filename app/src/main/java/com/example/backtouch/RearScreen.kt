@@ -20,7 +20,12 @@ import kotlinx.coroutines.launch
  * on the cover screen while the phone is unfolded.
  */
 @OptIn(ExperimentalWindowApi::class)
-class RearScreen(private val activity: Activity, private val onStatus: (String) -> Unit) {
+class RearScreen(
+    private val activity: Activity,
+    private val onStatus: (String) -> Unit,
+    private val autoStart: () -> Boolean = { false },
+) {
+    private var autoStarted = false
     private val controller = WindowAreaController.getOrCreate()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var rear: WindowAreaInfo? = null
@@ -35,13 +40,19 @@ class RearScreen(private val activity: Activity, private val onStatus: (String) 
                 val status = rear
                     ?.getCapability(WindowAreaCapability.Operation.OPERATION_PRESENT_ON_AREA)
                     ?.status
+                val available = status == WindowAreaCapability.Status.WINDOW_AREA_STATUS_AVAILABLE
                 onStatus(
                     when {
-                        areas.isEmpty() -> "Cover screen API: no screen areas reported by this phone"
-                        rear == null -> "Cover screen API: ${areas.size} area(s), none rear-facing"
-                        else -> "Cover screen API: present mode = $status"
+                        session != null -> "Cover screen: trackpad running"
+                        areas.isEmpty() || rear == null -> "Cover screen: not available on this phone"
+                        available -> "Cover screen: ready"
+                        else -> "Cover screen: unfold the phone (status: $status)"
                     }
                 )
+                if (available && session == null && !autoStarted && autoStart()) {
+                    autoStarted = true
+                    toggle()
+                }
             }
         }
     }
