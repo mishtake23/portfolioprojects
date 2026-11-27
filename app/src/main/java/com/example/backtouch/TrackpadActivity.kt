@@ -20,7 +20,7 @@ class TrackpadActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setContentView(TrackpadView(this).apply { setBackgroundColor(Color.rgb(24, 24, 28)) })
+        setContentView(TrackpadView(this))
     }
 }
 
@@ -35,7 +35,9 @@ class TrackpadActivity : Activity() {
  *  3 finger tap       -> pause / resume
  * Palm rejection: touches that start near an edge, or with a large contact area, are ignored.
  */
-private class TrackpadView(ctx: Context) : View(ctx) {
+internal class TrackpadView(ctx: Context) : View(ctx) {
+    init { setBackgroundColor(Color.rgb(24, 24, 28)) }
+
     private val settings = Settings(ctx)
     private val density = resources.displayMetrics.density
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()

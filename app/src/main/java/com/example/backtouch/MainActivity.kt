@@ -18,6 +18,9 @@ import android.widget.Toast
 class MainActivity : Activity() {
     private lateinit var root: LinearLayout
     private lateinit var status: TextView
+    private lateinit var rear: RearScreen
+    private var rearStatus = "Cover screen API: checking..."
+    private var rearView: TextView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -26,6 +29,16 @@ class MainActivity : Activity() {
             setPadding(48, 96, 48, 48)
         }
         setContentView(ScrollView(this).apply { addView(root) })
+        rear = RearScreen(this) { msg ->
+            rearStatus = msg
+            rearView?.text = msg
+        }
+        rear.start()
+    }
+
+    override fun onDestroy() {
+        rear.stop()
+        super.onDestroy()
     }
 
     override fun onResume() {
@@ -52,11 +65,15 @@ class MainActivity : Activity() {
         }
         status.text = sb.toString()
 
+        rearView = TextView(this).apply { text = rearStatus; setPadding(0, 24, 0, 0) }
+        root.addView(rearView)
+        root.addView(button("2. Trackpad on cover screen (phone unfolded)") { rear.toggle() })
+
         root.addView(button("Test trackpad on THIS screen") {
             startActivity(Intent(this, TrackpadActivity::class.java))
         })
         for (d in displays.filter { it.displayId != android.view.Display.DEFAULT_DISPLAY }) {
-            root.addView(button("2. Open trackpad on display ${d.displayId} (${d.name})") {
+            root.addView(button("Open trackpad on display ${d.displayId} (${d.name})") {
                 launchOn(d.displayId)
             })
         }
@@ -65,9 +82,8 @@ class MainActivity : Activity() {
         root.addView(TextView(this).apply {
             textSize = 13f
             setPadding(0, 32, 0, 0)
-            text = "Unfold the phone, then press the display button. If the cover " +
-                "display is off, the launch will fail or show nothing - that tells us " +
-                "we need the ADB/Shizuku route to wake it."
+            text = "Unfold the phone, open this app, then press button 2. " +
+                "Note what the 'Cover screen API' line says and what happens on the cover screen."
         })
     }
 

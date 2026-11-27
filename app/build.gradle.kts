@@ -30,4 +30,8 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 }
-// No third-party dependencies on purpose (Step 1+2 use only the Android framework).
+dependencies {
+    // Rear (cover) display presentation API, used while the phone is unfolded.
+    implementation("androidx.window:window:1.3.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+}
