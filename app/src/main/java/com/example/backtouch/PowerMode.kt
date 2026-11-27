@@ -81,6 +81,7 @@ object PowerMode {
             log.appendLine("No dual-screen state found on this phone, so power mode can't work here.")
             return log.toString()
         }
+        Prefs(ctx).powerStateId = target.id
         log.appendLine("Switching to ${target.name} (${target.id})")
         log.appendLine(exec("cmd device_state state ${target.id}").ifBlank { "ok" })
         Thread.sleep(1200)
@@ -93,11 +94,7 @@ object PowerMode {
             exec("cmd device_state state reset")
             return log.toString()
         }
-        // Apps aren't allowed to open windows on the cover display themselves, the shell is.
-        val out = exec(
-            "am start --display ${d.displayId} -f 0x18000000 " +
-                "-n ${ctx.packageName}/${TrackpadActivity::class.java.name} --ez power true"
-        )
+        val out = openTrackpad(ctx, d.displayId)
         log.appendLine(out)
         if (out.contains("Error", true) || out.contains("Exception", true)) {
             log.appendLine("Couldn't open the trackpad on the cover screen.")
@@ -107,6 +104,26 @@ object PowerMode {
             Prefs(ctx).powerMode = true
         }
         return log.toString()
+    }
+
+    /** Apps aren't allowed to open windows on the cover display themselves; the shell is. */
+    private fun openTrackpad(ctx: Context, displayId: Int): String = exec(
+        "am start --display $displayId -f 0x18000000 " +
+            "-n ${ctx.packageName}/${TrackpadActivity::class.java.name} --ez power true"
+    )
+
+    /**
+     * Android may switch the cover screen off again (for example when another app comes to
+     * the front). Turn it back on and reopen the trackpad. Blocking.
+     */
+    fun reapply(ctx: Context): Boolean {
+        val id = Prefs(ctx).powerStateId
+        if (id < 0 || state() != State.READY) return false
+        exec("cmd device_state state $id")
+        Thread.sleep(800)
+        val d = coverDisplay(ctx) ?: return false
+        openTrackpad(ctx, d.displayId)
+        return true
     }
 
     /** Blocking. */

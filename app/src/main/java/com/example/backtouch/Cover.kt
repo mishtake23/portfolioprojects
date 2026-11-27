@@ -56,6 +56,10 @@ class CoverHostActivity : Activity() {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         )
         window.setDimAmount(0f)
+        // Android 12+ blocks touches that pass through another app's window unless that
+        // window is fully invisible (anti-clickjacking). Alpha 0 = invisible, so every tap
+        // and swipe reaches the app underneath.
+        window.attributes = window.attributes.apply { alpha = 0f }
         rear = RearScreen(this, object : RearScreen.Listener {
             override fun onAvailability(available: Boolean, message: String) {
                 if (available && !requested) {

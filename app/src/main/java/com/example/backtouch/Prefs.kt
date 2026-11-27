@@ -56,6 +56,9 @@ class Prefs(ctx: Context) {
     /** Use Shizuku to turn the cover screen on as a real second screen. */
     var powerMode: Boolean get() = b("powerMode", false); set(v) = putB("powerMode", v)
 
+    /** Device state id used by power mode (-1 = unknown). */
+    var powerStateId: Int get() = p.getInt("powerStateId", -1); set(v) = p.edit().putInt("powerStateId", v).apply()
+
     /** Put the trackpad on the cover screen as soon as the app is opened unfolded. */
     var autoStartCover: Boolean get() = b("autoStartCover", false); set(v) = putB("autoStartCover", v)
 }

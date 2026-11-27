@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
@@ -72,6 +73,38 @@ class CursorService : AccessibilityService() {
     private val relaunchRunnable = Runnable { tryRelaunch() }
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) = scheduleRelaunch(600)
+    }
+
+    // ---- Power mode watchdog ----
+    private val powerLaunches = ArrayDeque<Long>()
+    @Volatile private var powerFixing = false
+    private val powerCheck = Runnable { checkPowerMode() }
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(id: Int) {}
+        override fun onDisplayChanged(id: Int) {}
+        override fun onDisplayRemoved(id: Int) {
+            handler.removeCallbacks(powerCheck)
+            handler.postDelayed(powerCheck, 400)
+        }
+    }
+
+    private fun checkPowerMode() {
+        if (!::prefs.isInitialized || !prefs.powerMode || powerFixing || !isUnfolded()) return
+        val dm = getSystemService(DisplayManager::class.java)
+        if (dm.displays.any { it.displayId != android.view.Display.DEFAULT_DISPLAY }) return
+        val now = SystemClock.uptimeMillis()
+        while (powerLaunches.isNotEmpty() && now - powerLaunches.first() > 20_000) powerLaunches.removeFirst()
+        if (powerLaunches.size >= 5) {
+            prefs.powerMode = false
+            Cover.lastError = "Power mode stopped: Android kept turning the cover screen off."
+            powerLaunches.clear()
+            return
+        }
+        powerLaunches.addLast(now)
+        powerFixing = true
+        Thread {
+            try { PowerMode.reapply(applicationContext) } finally { powerFixing = false }
+        }.start()
     }
 
     /** Called when the cover host closed; brings the trackpad back if the user still wants it. */
@@ -148,6 +181,7 @@ class CursorService : AccessibilityService() {
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenReceiver, f, RECEIVER_NOT_EXPORTED)
         else registerReceiver(screenReceiver, f)
         scheduleRelaunch(500)
+        getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, handler)
     }
 
     private fun pointerScale() = when (prefs.pointerSize) { 0 -> 0.85f; 1 -> 1.1f; else -> 1.4f }
@@ -180,6 +214,7 @@ class CursorService : AccessibilityService() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         refreshBounds()
+        handler.postDelayed(powerCheck, 800) // unfolded again: power mode back on
         scheduleRelaunch(800) // unfolded again: bring the trackpad back
     }
 
@@ -401,6 +436,7 @@ class CursorService : AccessibilityService() {
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) prefs.unlisten(prefListener)
         runCatching { unregisterReceiver(screenReceiver) }
+        runCatching { getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         overlay?.let { runCatching { wm.removeView(it) } }
         overlay = null
         pointer = null
