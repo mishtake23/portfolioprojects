@@ -366,6 +366,7 @@ class MainActivity : ComponentActivity() {
         var hide by remember { mutableStateOf(prefs.autoHideCursor) }
         var scroll by remember { mutableStateOf(prefs.scrollSpeed) }
         var invert by remember { mutableStateOf(prefs.invertScroll) }
+        var classic by remember { mutableStateOf(prefs.classicScroll) }
         var vib by remember { mutableStateOf(prefs.haptics) }
         var edge by remember { mutableStateOf(prefs.edgePct.toFloat()) }
         var nav by remember { mutableStateOf(prefs.showNavBar) }
@@ -383,6 +384,9 @@ class MainActivity : ComponentActivity() {
         Section("Scrolling") {
             SliderRow("Scroll speed", scroll, 0.5f..4f, "%.1f".format(scroll)) { scroll = it; prefs.scrollSpeed = it }
             SwitchRow("Reverse direction", null, invert) { invert = it; prefs.invertScroll = it }
+            SwitchRow("Classic scrolling", "Short swipes instead of a continuous finger. Try this if scrolling stops or skips", classic) {
+                classic = it; prefs.classicScroll = it
+            }
         }
         Section("Feel") {
             Segmented("Vibration", listOf("Off", "Light", "Medium", "Strong"), vib) {

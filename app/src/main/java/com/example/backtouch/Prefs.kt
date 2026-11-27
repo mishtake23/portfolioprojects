@@ -27,6 +27,9 @@ class Prefs(ctx: Context) {
     /** Flip left/right, because the cover screen faces away from you when used from behind. */
     var mirrorX: Boolean get() = b("mirrorX", true); set(v) = putB("mirrorX", v)
 
+    /** Scroll with separate short swipes instead of one continuous finger (fallback). */
+    var classicScroll: Boolean get() = b("classicScroll", false); set(v) = putB("classicScroll", v)
+
     var invertScroll: Boolean get() = b("invertScroll", false); set(v) = putB("invertScroll", v)
 
     /** 0 = off, 1 = light, 2 = medium, 3 = strong. */

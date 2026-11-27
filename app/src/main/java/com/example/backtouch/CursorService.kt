@@ -117,6 +117,7 @@ class CursorService : AccessibilityService() {
 
         prefs = Prefs(this)
         autoHide = prefs.autoHideCursor
+        classicScroll = prefs.classicScroll
         val d = resources.displayMetrics.density
         val root = FrameLayout(this)
         val p = PointerView(this, d)
@@ -153,6 +154,7 @@ class CursorService : AccessibilityService() {
 
     private fun applyPrefs() {
         autoHide = prefs.autoHideCursor
+        classicScroll = prefs.classicScroll
         val p = pointer ?: return
         val (pw, ph) = p.sizeFor(pointerScale())
         p.layoutParams = p.layoutParams.apply { width = pw; height = ph }
@@ -261,6 +263,7 @@ class CursorService : AccessibilityService() {
 
     /** dx/dy in inner-screen pixels; same direction as the finger moved. */
     fun scrollBy(dx: Float, dy: Float) {
+        if (classicScroll) { classicScrollBy(dx, dy); return }
         if (isDragging || ending) return
         if (!fingerDown) {
             fingerStart(x, y, dx, dy, follow = false)
@@ -275,7 +278,43 @@ class CursorService : AccessibilityService() {
 
     /** End the scroll; vx/vy (px per ms) let the app fling like a real swipe. */
     fun scrollEnd(vx: Float, vy: Float) {
+        if (classicScroll) { classicPendX = 0f; classicPendY = 0f; return }
         if (fingerDown && !followCursor) fingerEnd(vx, vy)
+    }
+
+    // ---- Classic scroll: separate short swipes, queued so they never cancel each other ----
+
+    var classicScroll = false
+    private var classicPendX = 0f
+    private var classicPendY = 0f
+    private var classicBusy = false
+
+    private fun classicScrollBy(dx: Float, dy: Float) {
+        if (fingerDown) return
+        classicPendX += dx; classicPendY += dy
+        pumpClassic()
+    }
+
+    private fun pumpClassic() {
+        if (classicBusy) return
+        val minPx = 24 * resources.displayMetrics.density
+        if (Math.hypot(classicPendX.toDouble(), classicPendY.toDouble()) < minPx) return
+        val m = SCROLL_MARGIN
+        val sx = r(x.coerceIn(m, w - m)); val sy = r(y.coerceIn(m, h - m))
+        val ex = r((sx + classicPendX).coerceIn(m, w - m)); val ey = r((sy + classicPendY).coerceIn(m, h - m))
+        classicPendX = 0f; classicPendY = 0f
+        if (ex == sx && ey == sy) return
+        classicBusy = true
+        val path = Path().apply { moveTo(sx, sy); lineTo(ex, ey) }
+        val ok = dispatchGesture(
+            GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 120)).build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription?) { classicBusy = false; pumpClassic() }
+                override fun onCancelled(g: GestureDescription?) { classicBusy = false; pumpClassic() }
+            },
+            null
+        )
+        if (!ok) classicBusy = false
     }
 
     // ---- Virtual finger internals ----
@@ -286,9 +325,13 @@ class CursorService : AccessibilityService() {
         ending = false
         flingX = 0f; flingY = 0f
         val m = SCROLL_MARGIN
+        // Whole pixels only: Android drops a continued touch whose next piece doesn't start
+        // exactly where the last one ended, and fractions make that fail at random.
+        val ox = r(sx); val oy = r(sy)
         fx = (sx + dx).coerceIn(m, w - m); fy = (sy + dy).coerceIn(m, h - m)
-        val path = Path().apply { moveTo(sx, sy); if (fx != sx || fy != sy) lineTo(fx, fy) }
-        sentX = fx; sentY = fy
+        val ex = r(fx); val ey = r(fy)
+        val path = Path().apply { moveTo(ox, oy); if (ex != ox || ey != oy) lineTo(ex, ey) }
+        sentX = ex; sentY = ey
         val s = GestureDescription.StrokeDescription(path, 0, SEG_MS, true)
         stroke = s
         send(s, last = false)
@@ -306,11 +349,11 @@ class CursorService : AccessibilityService() {
     private fun pump() {
         val prev = stroke ?: return
         if (busy) return
-        var tx = fx; var ty = fy
+        var tx = r(fx); var ty = r(fy)
         if (ending && (flingX != 0f || flingY != 0f)) {
             // Last segment continues at release speed so lists fling naturally.
-            tx = (fx + flingX * SEG_MS).coerceIn(1f, w - 1f)
-            ty = (fy + flingY * SEG_MS).coerceIn(1f, h - 1f)
+            tx = r((fx + flingX * SEG_MS).coerceIn(1f, w - 1f))
+            ty = r((fy + flingY * SEG_MS).coerceIn(1f, h - 1f))
         }
         val moved = tx != sentX || ty != sentY
         if (!moved && !ending) return
@@ -320,6 +363,8 @@ class CursorService : AccessibilityService() {
         stroke = s
         send(s, last = ending)
     }
+
+    private fun r(v: Float) = Math.round(v).toFloat()
 
     private fun send(s: GestureDescription.StrokeDescription, last: Boolean) {
         busy = true
