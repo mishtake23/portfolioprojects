@@ -83,6 +83,7 @@ class CursorService : AccessibilityService() {
         override fun onDisplayAdded(id: Int) {}
         override fun onDisplayChanged(id: Int) {}
         override fun onDisplayRemoved(id: Int) {
+            if (id == padDisplayId) { padView = null; padWm = null; padDisplayId = -1 }
             handler.removeCallbacks(powerCheck)
             handler.postDelayed(powerCheck, 400)
         }
@@ -91,7 +92,7 @@ class CursorService : AccessibilityService() {
     private fun checkPowerMode() {
         if (!::prefs.isInitialized || !prefs.powerMode || powerFixing || !isUnfolded()) return
         val dm = getSystemService(DisplayManager::class.java)
-        if (dm.displays.any { it.displayId != android.view.Display.DEFAULT_DISPLAY }) return
+        if (padDisplayId != -1 && dm.displays.any { it.displayId == padDisplayId }) return
         val now = SystemClock.uptimeMillis()
         while (powerLaunches.isNotEmpty() && now - powerLaunches.first() > 20_000) powerLaunches.removeFirst()
         if (powerLaunches.size >= 5) {
@@ -105,6 +106,48 @@ class CursorService : AccessibilityService() {
         Thread {
             try { PowerMode.reapply(applicationContext) } finally { powerFixing = false }
         }.start()
+    }
+
+    // ---- Power mode: the trackpad as an accessibility overlay on the cover display ----
+    private var padView: View? = null
+    private var padWm: WindowManager? = null
+    var padDisplayId = -1
+        private set
+
+    /**
+     * Shows the trackpad on [displayId]. Android won't let an app (or even the shell) open an
+     * activity on the cover display, but an accessibility service may draw its own overlay there,
+     * and that overlay doesn't care which app is in front. Must run on the main thread.
+     */
+    fun showCoverPad(displayId: Int): String {
+        hideCoverPad()
+        return try {
+            val display = getSystemService(DisplayManager::class.java).getDisplay(displayId)
+                ?: return "Display $displayId is gone."
+            val ctx = createDisplayContext(display)
+                .createWindowContext(WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, null)
+            val pwm = ctx.getSystemService(WindowManager::class.java)
+            val view = TrackpadView(ctx)
+            val lp = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                PixelFormat.OPAQUE
+            )
+            pwm.addView(view, lp)
+            padView = view; padWm = pwm; padDisplayId = displayId
+            "Trackpad shown on the cover screen (display $displayId)."
+        } catch (t: Throwable) {
+            "Couldn't show the trackpad on display $displayId: ${t.message ?: t.javaClass.simpleName}"
+        }
+    }
+
+    fun hideCoverPad() {
+        padView?.let { v -> runCatching { padWm?.removeView(v) } }
+        padView = null; padWm = null; padDisplayId = -1
     }
 
     /** Called when the cover host closed; brings the trackpad back if the user still wants it. */
@@ -435,6 +478,7 @@ class CursorService : AccessibilityService() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) prefs.unlisten(prefListener)
+        hideCoverPad()
         runCatching { unregisterReceiver(screenReceiver) }
         runCatching { getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         overlay?.let { runCatching { wm.removeView(it) } }

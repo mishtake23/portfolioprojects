@@ -4,7 +4,11 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.view.Display
+import android.os.Handler
+import android.os.Looper
 import rikka.shizuku.Shizuku
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Optional "power mode" using Shizuku (no root; started once via Wireless debugging).
@@ -94,23 +98,28 @@ object PowerMode {
             exec("cmd device_state state reset")
             return log.toString()
         }
-        val out = openTrackpad(ctx, d.displayId)
+        val out = showPad(d.displayId)
         log.appendLine(out)
-        if (out.contains("Error", true) || out.contains("Exception", true)) {
-            log.appendLine("Couldn't open the trackpad on the cover screen.")
-            exec("cmd device_state state reset")
-        } else {
-            log.appendLine("Trackpad opened on display ${d.displayId}.")
+        if (out.startsWith("Trackpad shown")) {
             Prefs(ctx).powerMode = true
+        } else {
+            exec("cmd device_state state reset")
         }
         return log.toString()
     }
 
-    /** Apps aren't allowed to open windows on the cover display themselves; the shell is. */
-    private fun openTrackpad(ctx: Context, displayId: Int): String = exec(
-        "am start --display $displayId -f 0x18000000 " +
-            "-n ${ctx.packageName}/${TrackpadActivity::class.java.name} --ez power true"
-    )
+    /** Asks the accessibility service (main thread) to draw the trackpad on [displayId]. Blocking. */
+    private fun showPad(displayId: Int): String {
+        val svc = CursorService.instance ?: return "BackTouch isn't switched on in Accessibility."
+        var result = "Timed out"
+        val done = CountDownLatch(1)
+        Handler(Looper.getMainLooper()).post {
+            result = svc.showCoverPad(displayId)
+            done.countDown()
+        }
+        done.await(3, TimeUnit.SECONDS)
+        return result
+    }
 
     /**
      * Android may switch the cover screen off again (for example when another app comes to
@@ -122,13 +131,13 @@ object PowerMode {
         exec("cmd device_state state $id")
         Thread.sleep(800)
         val d = coverDisplay(ctx) ?: return false
-        openTrackpad(ctx, d.displayId)
-        return true
+        return showPad(d.displayId).startsWith("Trackpad shown")
     }
 
     /** Blocking. */
     fun stop(ctx: Context): String {
         Prefs(ctx).powerMode = false
+        Handler(Looper.getMainLooper()).post { CursorService.instance?.hideCoverPad() }
         return exec("cmd device_state state reset").ifBlank { "Cover screen back to normal." }
     }
 }
