@@ -13,7 +13,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -370,16 +373,46 @@ class MainActivity : ComponentActivity() {
         var vib by remember { mutableStateOf(prefs.haptics) }
         var edge by remember { mutableStateOf(prefs.edgePct.toFloat()) }
         var nav by remember { mutableStateOf(prefs.showNavBar) }
+        var style by remember { mutableStateOf(prefs.pointerStyle) }
+        var color by remember { mutableStateOf(prefs.pointerColor) }
+        var opacity by remember { mutableStateOf(prefs.pointerOpacity.toFloat()) }
+        var joy by remember { mutableStateOf(prefs.joystick) }
+        var joySpeed by remember { mutableStateOf(prefs.joystickSpeed) }
         val ctx = LocalContext.current
 
         Section("Pointer") {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 8.dp)) {
+                PointerPreview(style, color, opacity / 100f, size)
+                Spacer(Modifier.width(16.dp))
+                Text(
+                    "Looks like this on the inner screen",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Segmented("Style", listOf("Dot", "Arrow", "Ring"), style) { style = it; prefs.pointerStyle = it }
+            Text("Colour", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp))
+            ColorSwatches(color) { color = it; prefs.pointerColor = it }
             Segmented("Size", listOf("Small", "Medium", "Large"), size) { size = it; prefs.pointerSize = it }
+            SliderRow("Opacity", opacity, 30f..100f, "${opacity.toInt()}%") { opacity = it; prefs.pointerOpacity = it.toInt() }
             SliderRow("Speed", speed, 0.5f..4f, "%.1f".format(speed)) { speed = it; prefs.sensitivity = it }
             SliderRow("Acceleration", accel, 0f..2f, "%.1f".format(accel)) { accel = it; prefs.acceleration = it }
             SwitchRow("Mirror left and right", "Keep on when your fingers are behind the phone", mirror) {
                 mirror = it; prefs.mirrorX = it
             }
             SwitchRow("Hide when idle", null, hide) { hide = it; prefs.autoHideCursor = it }
+        }
+        Section("Joystick") {
+            SwitchRow(
+                "Floating joystick",
+                "A small joystick on the inner screen: push it to move the pointer, tap it to click, hold it to move it",
+                joy
+            ) { joy = it; prefs.joystick = it }
+            if (joy) {
+                SliderRow("Joystick speed", joySpeed, 0.3f..2.5f, "%.1f".format(joySpeed)) {
+                    joySpeed = it; prefs.joystickSpeed = it
+                }
+            }
         }
         Section("Scrolling") {
             SliderRow("Scroll speed", scroll, 0.5f..4f, "%.1f".format(scroll)) { scroll = it; prefs.scrollSpeed = it }
@@ -418,6 +451,9 @@ class MainActivity : ComponentActivity() {
                 "3 fingers right" to "Recent apps",
                 "3 fingers down" to "Notifications",
                 "3-finger tap" to "Pause / resume",
+                "Joystick: push" to "Move pointer",
+                "Joystick: tap" to "Click",
+                "Joystick: hold" to "Move the joystick",
             )
             rows.forEachIndexed { i, (g, a) ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
@@ -532,6 +568,74 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(12.dp)
                     )
                 }
+            }
+        }
+    }
+
+    @Composable
+    private fun PointerPreview(style: Int, argb: Int, alpha: Float, size: Int) {
+        val scale = when (size) { 0 -> 0.85f; 1 -> 1.1f; else -> 1.4f } * 1.6f
+        val main = androidx.compose.ui.graphics.Color(argb).copy(alpha = alpha)
+        val edge = if (androidx.compose.ui.graphics.Color(argb).luminance() > 0.5f)
+            androidx.compose.ui.graphics.Color(0xFF191919).copy(alpha = alpha)
+        else androidx.compose.ui.graphics.Color.White.copy(alpha = alpha)
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier.size(64.dp)
+        ) {
+            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                val u = 1.dp.toPx() * scale
+                val c = center
+                when (style) {
+                    1 -> {
+                        val pts = listOf(0f to 0f, 0f to 16.5f, 3.9f to 12.9f, 6.4f to 18.6f, 8.9f to 17.5f, 6.4f to 11.9f, 11.6f to 11.9f)
+                        val ox = c.x - 6f * u; val oy = c.y - 9.5f * u
+                        val path = androidx.compose.ui.graphics.Path().apply {
+                            pts.forEachIndexed { i, (px, py) ->
+                                if (i == 0) moveTo(ox + px * u, oy + py * u) else lineTo(ox + px * u, oy + py * u)
+                            }
+                            close()
+                        }
+                        drawPath(path, main)
+                        drawPath(path, edge, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.1f * u))
+                    }
+                    2 -> {
+                        val r = 9f * u - 1.5f * u
+                        drawCircle(edge, r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.2f * u))
+                        drawCircle(main, r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.4f * u))
+                        drawCircle(main, 1.4f * u, c)
+                    }
+                    else -> {
+                        drawCircle(main, 5.5f * u, c)
+                        drawCircle(edge, 5.5f * u, c, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.2f * u))
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ColorSwatches(selected: Int, onPick: (Int) -> Unit) {
+        val colors = listOf(
+            0xFFFFFFFF, 0xFF1C1C1E, 0xFF3D7BFF, 0xFFFF4D4D,
+            0xFF2ECC71, 0xFFFFD43B, 0xFF9B5CFF, 0xFFFF8A3D
+        ).map { it.toInt() }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+            colors.forEach { c ->
+                val isSel = c == selected
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .border(
+                            width = if (isSel) 3.dp else 1.dp,
+                            color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                            shape = CircleShape
+                        )
+                        .padding(4.dp)
+                        .background(androidx.compose.ui.graphics.Color(c), CircleShape)
+                        .clickable { onPick(c) }
+                )
             }
         }
     }

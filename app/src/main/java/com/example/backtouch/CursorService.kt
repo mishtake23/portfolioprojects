@@ -197,7 +197,7 @@ class CursorService : AccessibilityService() {
         val d = resources.displayMetrics.density
         val root = FrameLayout(this)
         val p = PointerView(this, d)
-        val (pw, ph) = p.sizeFor(pointerScale())
+        val (pw, ph) = p.configure(prefs.pointerStyle, prefs.pointerColor, prefs.pointerOpacity, pointerScale())
         root.addView(p, FrameLayout.LayoutParams(pw, ph))
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -225,6 +225,24 @@ class CursorService : AccessibilityService() {
         else registerReceiver(screenReceiver, f)
         scheduleRelaunch(500)
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, handler)
+        updateJoystick()
+    }
+
+    // ---- Joystick on the inner screen ----
+    private var joystick: JoystickView? = null
+
+    private fun updateJoystick() {
+        if (prefs.joystick && joystick == null) {
+            joystick = JoystickView(this, this, prefs).also { it.attach(wm) }
+        } else if (!prefs.joystick && joystick != null) {
+            joystick?.detach(wm); joystick = null
+        }
+    }
+
+    /** Taps land on the window under the pointer; if that's the joystick, let them through. */
+    private fun passThroughJoystick() {
+        val j = joystick ?: return
+        if (j.contains(x, y)) j.passThrough(wm, 400)
     }
 
     private fun pointerScale() = when (prefs.pointerSize) { 0 -> 0.85f; 1 -> 1.1f; else -> 1.4f }
@@ -232,8 +250,9 @@ class CursorService : AccessibilityService() {
     private fun applyPrefs() {
         autoHide = prefs.autoHideCursor
         classicScroll = prefs.classicScroll
+        updateJoystick()
         val p = pointer ?: return
-        val (pw, ph) = p.sizeFor(pointerScale())
+        val (pw, ph) = p.configure(prefs.pointerStyle, prefs.pointerColor, prefs.pointerOpacity, pointerScale())
         p.layoutParams = p.layoutParams.apply { width = pw; height = ph }
         p.post { place() }
         wake()
@@ -305,12 +324,14 @@ class CursorService : AccessibilityService() {
     fun tap() {
         if (fingerDown) return
         wake()
+        passThroughJoystick()
         dispatch(GestureDescription.StrokeDescription(Path().apply { moveTo(x, y) }, 0, 40))
     }
 
     fun longPress() {
         if (fingerDown) return
         wake()
+        passThroughJoystick()
         dispatch(GestureDescription.StrokeDescription(Path().apply { moveTo(x, y) }, 0, 650))
     }
 
@@ -479,6 +500,7 @@ class CursorService : AccessibilityService() {
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) prefs.unlisten(prefListener)
         hideCoverPad()
+        joystick?.detach(wm); joystick = null
         runCatching { unregisterReceiver(screenReceiver) }
         runCatching { getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         overlay?.let { runCatching { wm.removeView(it) } }
@@ -495,18 +517,24 @@ class CursorService : AccessibilityService() {
     }
 }
 
-/** Small white arrow with a dark outline and soft shadow, like the Samsung DeX pointer. */
-private class PointerView(ctx: Context, private val d: Float) : View(ctx) {
-    private var s = d * 0.85f
-    val tipX get() = PAD * s
-    val tipY get() = PAD * s
+/** The pointer: a dot (default), a DeX-style arrow, or a ring, in any colour. */
+internal class PointerView(ctx: Context, private val d: Float) : View(ctx) {
+    private var style = 0
+    private var color = Color.WHITE
+    private var alphaPct = 90
+    private var s = d
+    private var pw = 0
+    private var ph = 0
+
+    /** Where the click lands, relative to the view. */
+    val tipX get() = if (style == 1) PAD * s else pw / 2f
+    val tipY get() = if (style == 1) PAD * s else ph / 2f
 
     var dragging = false
         set(v) { field = v; invalidate() }
 
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(20, 20, 20)
         style = Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
         strokeCap = Paint.Cap.ROUND
@@ -515,42 +543,67 @@ private class PointerView(ctx: Context, private val d: Float) : View(ctx) {
 
     init { setLayerType(LAYER_TYPE_SOFTWARE, null) } // needed for the shadow
 
-    /** Sets the scale and returns the view size in pixels. */
-    fun sizeFor(scale: Float): Pair<Int, Int> {
+    /** Applies style / colour / scale and returns the view size in pixels. */
+    fun configure(style: Int, color: Int, alphaPct: Int, scale: Float): Pair<Int, Int> {
+        this.style = style; this.color = color; this.alphaPct = alphaPct
         s = d * scale
-        return ((W + 2 * PAD) * s).toInt() to ((H + 2 * PAD) * s).toInt()
+        val (w, h) = when (style) {
+            1 -> (ARROW_W + 2 * PAD) * s to (ARROW_H + 2 * PAD) * s
+            2 -> (RING + 2 * PAD) * s to (RING + 2 * PAD) * s
+            else -> (DOT + 2 * PAD) * s to (DOT + 2 * PAD) * s
+        }
+        pw = w.toInt(); ph = h.toInt()
+        buildArrow()
+        invalidate()
+        return pw to ph
     }
 
-    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
-        // Arrow outline in "pointer units" (tip at 0,0), offset by PAD for outline + shadow.
-        val pts = floatArrayOf(
-            0f, 0f,
-            0f, 16.5f,
-            3.9f, 12.9f,
-            6.4f, 18.6f,
-            8.9f, 17.5f,
-            6.4f, 11.9f,
-            11.6f, 11.9f
-        )
+    private fun buildArrow() {
+        val pts = floatArrayOf(0f, 0f, 0f, 16.5f, 3.9f, 12.9f, 6.4f, 18.6f, 8.9f, 17.5f, 6.4f, 11.9f, 11.6f, 11.9f)
         arrow.reset()
         for (i in pts.indices step 2) {
             val px = (pts[i] + PAD) * s; val py = (pts[i + 1] + PAD) * s
             if (i == 0) arrow.moveTo(px, py) else arrow.lineTo(px, py)
         }
         arrow.close()
-        outline.strokeWidth = 1.1f * s
-        fill.setShadowLayer(1.6f * s, 0f, 0.8f * s, Color.argb(110, 0, 0, 0))
     }
 
     override fun onDraw(c: Canvas) {
-        fill.color = if (dragging) Color.rgb(120, 190, 255) else Color.WHITE
-        c.drawPath(arrow, fill)
-        c.drawPath(arrow, outline)
+        val a = (alphaPct * 255 / 100).coerceIn(40, 255)
+        val main = if (dragging) Color.rgb(90, 170, 255) else color
+        val edge = if (Color.luminance(main) > 0.5f) Color.rgb(25, 25, 25) else Color.WHITE
+        fill.color = main; fill.alpha = a
+        outline.color = edge; outline.alpha = a
+        fill.setShadowLayer(1.6f * s, 0f, 0.8f * s, Color.argb(a / 2, 0, 0, 0))
+        val cx = pw / 2f; val cy = ph / 2f
+        when (style) {
+            1 -> {
+                outline.strokeWidth = 1.1f * s
+                c.drawPath(arrow, fill); c.drawPath(arrow, outline)
+            }
+            2 -> {
+                // Ring: thick coloured circle with thin contrasting edges, tiny centre dot.
+                val r = RING / 2f * s - 1.5f * s
+                outline.strokeWidth = 3.2f * s
+                val ring = Paint(fill).apply { style = Paint.Style.STROKE; strokeWidth = 2.4f * s }
+                c.drawCircle(cx, cy, r, outline)
+                c.drawCircle(cx, cy, r, ring)
+                c.drawCircle(cx, cy, 1.4f * s, fill)
+            }
+            else -> {
+                val r = DOT / 2f * s * (if (dragging) 1.25f else 1f)
+                outline.strokeWidth = 1.2f * s
+                c.drawCircle(cx, cy, r, fill)
+                c.drawCircle(cx, cy, r, outline)
+            }
+        }
     }
 
     companion object {
-        private const val W = 12f
-        private const val H = 19f
+        private const val ARROW_W = 12f
+        private const val ARROW_H = 19f
+        private const val DOT = 11f
+        private const val RING = 18f
         private const val PAD = 3f
     }
 }

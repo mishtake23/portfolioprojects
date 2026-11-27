@@ -41,6 +41,23 @@ class Prefs(ctx: Context) {
     /** 0 = small (default, DeX-like), 1 = medium, 2 = large. */
     var pointerSize: Int get() = p.getInt("pointerSize", 0); set(v) = p.edit().putInt("pointerSize", v).apply()
 
+    /** 0 = dot (default), 1 = arrow, 2 = ring. */
+    var pointerStyle: Int get() = p.getInt("pointerStyle", 0); set(v) = p.edit().putInt("pointerStyle", v).apply()
+
+    /** ARGB colour of the pointer. */
+    var pointerColor: Int get() = p.getInt("pointerColor", 0xFFFFFFFF.toInt()); set(v) = p.edit().putInt("pointerColor", v).apply()
+
+    /** Pointer opacity in percent (30..100). */
+    var pointerOpacity: Int get() = p.getInt("pointerOpacity", 90); set(v) = p.edit().putInt("pointerOpacity", v).apply()
+
+    /** Floating joystick on the inner screen. */
+    var joystick: Boolean get() = b("joystick", false); set(v) = putB("joystick", v)
+    var joystickX: Int get() = p.getInt("joystickX", -1); set(v) = p.edit().putInt("joystickX", v).apply()
+    var joystickY: Int get() = p.getInt("joystickY", -1); set(v) = p.edit().putInt("joystickY", v).apply()
+
+    /** Joystick top speed multiplier. */
+    var joystickSpeed: Float get() = f("joystickSpeed", 1f); set(v) = putF("joystickSpeed", v)
+
     fun listen(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         p.registerOnSharedPreferenceChangeListener(l)
 
