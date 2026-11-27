@@ -10,7 +10,7 @@ Use the cover (back) screen of a foldable as a trackpad for the unfolded inner s
 Not compiled yet: no Android SDK was available where this was written.
 
 ## Build
-Open `backtouch/` in Android Studio (it generates the Gradle wrapper), run on the phone.
+Open this repository folder in Android Studio (it generates the Gradle wrapper), run on the phone.
 
 ## Try it
 1. Install, open the app, tap "Enable accessibility service" and turn BackTouch on.
@@ -18,3 +18,6 @@ Open `backtouch/` in Android Studio (it generates the Gradle wrapper), run on th
 3. Tap "Open trackpad on display N" for the cover display. Move one finger = cursor, tap = click, hold = long press, two fingers = scroll.
 
 Key unknown: whether the cover display accepts touch while the phone is unfolded. If not, Step 3 uses ADB/Shizuku to force it on.
+
+## Repo note
+`covid-sql-analysis/` is unrelated to this app. It stays here only until it has moved to its own repository.
