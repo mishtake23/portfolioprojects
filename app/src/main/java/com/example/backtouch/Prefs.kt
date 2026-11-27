@@ -13,10 +13,10 @@ class Prefs(ctx: Context) {
     private fun putB(key: String, v: Boolean) = p.edit().putBoolean(key, v).apply()
 
     /** Base cursor speed multiplier. */
-    var sensitivity: Float get() = f("sensitivity", 1.8f); set(v) = putF("sensitivity", v)
+    var sensitivity: Float get() = f("sensitivity", DEF_SENS); set(v) = putF("sensitivity", v)
 
     /** Extra speed for fast swipes (0 = linear). */
-    var acceleration: Float get() = f("acceleration", 0.6f); set(v) = putF("acceleration", v)
+    var acceleration: Float get() = f("acceleration", DEF_ACCEL); set(v) = putF("acceleration", v)
 
     /** How far content scrolls per finger movement. */
     var scrollSpeed: Float get() = f("scrollSpeed", 1.6f); set(v) = putF("scrollSpeed", v)
@@ -58,6 +58,16 @@ class Prefs(ctx: Context) {
     /** Joystick top speed multiplier. */
     var joystickSpeed: Float get() = f("joystickSpeed", 1f); set(v) = putF("joystickSpeed", v)
 
+    /** 0 = crisp, 1 = soft, 2 = punchy. */
+    var hapticStyle: Int get() = p.getInt("hapticStyle", 0); set(v) = p.edit().putInt("hapticStyle", v).apply()
+
+    /** Faint ticks while the pointer moves, like feeling a surface. */
+    var movementFeel: Boolean get() = b("movementFeel", true); set(v) = putB("movementFeel", v)
+
+    fun resetPointer() {
+        sensitivity = DEF_SENS; acceleration = DEF_ACCEL
+    }
+
     fun listen(l: SharedPreferences.OnSharedPreferenceChangeListener) =
         p.registerOnSharedPreferenceChangeListener(l)
 
@@ -78,4 +88,9 @@ class Prefs(ctx: Context) {
 
     /** Put the trackpad on the cover screen as soon as the app is opened unfolded. */
     var autoStartCover: Boolean get() = b("autoStartCover", false); set(v) = putB("autoStartCover", v)
+
+    companion object {
+        const val DEF_SENS = 1.0f
+        const val DEF_ACCEL = 0.5f
+    }
 }

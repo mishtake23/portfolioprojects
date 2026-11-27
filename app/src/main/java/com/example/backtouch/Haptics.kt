@@ -22,15 +22,26 @@ class Haptics(ctx: Context) {
     /** 0 = off, 1 = light, 2 = medium, 3 = strong. */
     var level = 2
 
-    private val mult get() = when (level) { 1 -> 0.45f; 2 -> 0.75f; else -> 1f }
+    /** 0 = crisp, 1 = soft, 2 = punchy. */
+    var style = 0
+
+    private val mult get() = when (level) { 1 -> 0.45f; 2 -> 0.75f; else -> 1f } *
+        when (style) { 1 -> 0.7f; 2 -> 1.15f; else -> 1f }
+
+    /** Soft swaps sharp effects for rounder ones; punchy does the opposite. */
+    private fun styled(id: Int): Int = when (style) {
+        1 -> when (id) { CLICK -> TICK; THUD -> CLICK; TICK -> LOW_TICK; else -> id }
+        2 -> when (id) { TICK -> CLICK; CLICK -> if (Build.VERSION.SDK_INT >= 31) THUD else CLICK; else -> id }
+        else -> id
+    }
 
     /** Plays primitives as (id, scale, delayMs); returns false if unsupported. */
     private fun compose(vararg parts: Triple<Int, Float, Int>): Boolean {
         if (Build.VERSION.SDK_INT < 30) return false
-        val ids = parts.map { it.first }.distinct().toIntArray()
+        val ids = parts.map { styled(it.first) }.distinct().toIntArray()
         if (!vib.areAllPrimitivesSupported(*ids)) return false
         val c = VibrationEffect.startComposition()
-        for ((id, scale, delay) in parts) c.addPrimitive(id, (scale * mult).coerceIn(0.05f, 1f), delay)
+        for ((id, scale, delay) in parts) c.addPrimitive(styled(id), (scale * mult).coerceIn(0.05f, 1f), delay)
         vib.vibrate(c.compose())
         return true
     }
@@ -50,6 +61,13 @@ class Haptics(ctx: Context) {
     private val LOW_TICK get() = if (Build.VERSION.SDK_INT >= 31) VibrationEffect.Composition.PRIMITIVE_LOW_TICK else TICK
     private val THUD get() = if (Build.VERSION.SDK_INT >= 31) VibrationEffect.Composition.PRIMITIVE_THUD else CLICK
     private val RISE = VibrationEffect.Composition.PRIMITIVE_QUICK_RISE
+
+    /** Very faint tick while the pointer travels (not styled: always the lightest effect). */
+    fun moveTick() {
+        if (level <= 0 || Build.VERSION.SDK_INT < 31) return
+        if (!vib.areAllPrimitivesSupported(LOW_TICK)) return
+        vib.vibrate(VibrationEffect.startComposition().addPrimitive(LOW_TICK, 0.12f * mult).compose())
+    }
 
     /** Left click: one crisp click. */
     fun click() = play(12, 200, Triple(CLICK, 1f, 0))

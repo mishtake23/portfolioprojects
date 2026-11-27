@@ -66,8 +66,10 @@ internal class TrackpadView(ctx: Context) : View(ctx) {
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()
 
     // settings, re-read at the start of every gesture
-    private var sens = 1.8f
-    private var accel = 0.6f
+    private var sens = Prefs.DEF_SENS
+    private var accel = Prefs.DEF_ACCEL
+    private var feel = true
+    private var moveTickAcc = 0f
     private var scrollSpeed = 1.6f
     private var invert = false
     private var mirror = true
@@ -130,6 +132,8 @@ internal class TrackpadView(ctx: Context) : View(ctx) {
         invert = prefs.invertScroll
         mirror = prefs.mirrorX
         haptics.level = prefs.haptics
+        haptics.style = prefs.hapticStyle
+        feel = prefs.movementFeel
         val newNavH = if (prefs.showNavBar) 56 * d else 0f
         if (newNavH != navH) { navH = newNavH; invalidate() }
         CursorService.instance?.autoHide = prefs.autoHideCursor
@@ -312,7 +316,9 @@ internal class TrackpadView(ctx: Context) : View(ctx) {
             n >= 2 -> {
                 if (!scrolling && moved < slop) return
                 scrolling = true
-                val k = scrollSpeed * (if (invert) -1f else 1f)
+                // From behind the phone it should feel like a laptop wheel: fingers down = page down,
+                // the opposite of dragging the screen itself. "Reverse" flips it back.
+                val k = scrollSpeed * (if (invert) 1f else -1f)
                 val sdx = dx * k; val sdy = dy * k
                 svc.scrollBy(sdx, sdy)
                 scrollVx = scrollVx * 0.5f + (sdx / dt) * 0.5f
@@ -323,12 +329,20 @@ internal class TrackpadView(ctx: Context) : View(ctx) {
             }
             n == 1 && !multiDone -> {
                 val inst = dist / dt / d                       // dp per ms
-                speed = speed * 0.6f + inst * 0.4f             // smoothed, so it doesn't jitter
-                val gain = sens * (1f + accel * min(speed, 4f))
+                speed = speed * 0.7f + inst * 0.3f             // smoothed, so it doesn't jitter
+                // Pointer ballistics: slow movement is extra precise, normal speed is 1:1 * sens,
+                // only fast flicks get accelerated.
+                val slow = (speed / 0.6f).coerceIn(0f, 1f)
+                val precision = 0.45f + 0.55f * slow * slow * (3 - 2 * slow)   // smoothstep 0.45..1
+                val gain = sens * precision + sens * accel * max(0f, min(speed, 3f) - 0.6f)
                 if (holdArmed && moved > slop && !svc.isDragging) {
                     svc.dragStart(); haptics.dragStart()
                 }
                 if (svc.moveBy(dx * gain, dy * gain)) haptics.edge()
+                if (feel) {
+                    moveTickAcc += dist * gain
+                    if (moveTickAcc > MOVE_TICK_DP * d) { moveTickAcc = 0f; haptics.moveTick() }
+                }
             }
         }
     }
@@ -360,5 +374,6 @@ internal class TrackpadView(ctx: Context) : View(ctx) {
         private const val PALM_DP = 28f
         private const val SWIPE_DP = 40f
         private const val SCROLL_TICK_DP = 45f
+        private const val MOVE_TICK_DP = 70f
     }
 }

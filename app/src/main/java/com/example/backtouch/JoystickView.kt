@@ -119,7 +119,7 @@ internal class JoystickView(
                 downRawX = e.rawX; downRawY = e.rawY; downTime = e.eventTime
                 moved = false; moveMode = false; active = true
                 startLpX = lp.x; startLpY = lp.y
-                haptics.level = prefs.haptics
+                haptics.level = prefs.haptics; haptics.style = prefs.hapticStyle
                 postDelayed(holdTimer, 550)
             }
             MotionEvent.ACTION_MOVE -> {
