@@ -166,7 +166,7 @@ class CursorService : AccessibilityService() {
     }
 
     private fun tryRelaunch() {
-        if (!::prefs.isInitialized || !prefs.coverActive || prefs.powerMode) return
+        if (!::prefs.isInitialized || !prefs.coverActive || prefs.powerMode || !prefs.keepAliveLayer) return
         if (Cover.host != null || isFolded()) return
         val pm = getSystemService(PowerManager::class.java)
         val km = getSystemService(KeyguardManager::class.java)

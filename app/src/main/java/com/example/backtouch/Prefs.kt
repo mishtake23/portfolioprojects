@@ -80,6 +80,12 @@ class Prefs(ctx: Context) {
     /** The user has switched the cover trackpad on (auto-restart keeps it alive). */
     var coverActive: Boolean get() = b("coverActive", false); set(v) = putB("coverActive", v)
 
+    /**
+     * Experimental: keep an invisible BackTouch layer in front so the trackpad survives app
+     * switches without Shizuku. Off by default: on some phones (Samsung) it blocks other apps.
+     */
+    var keepAliveLayer: Boolean get() = b("keepAliveLayer", false); set(v) = putB("keepAliveLayer", v)
+
     /** Use Shizuku to turn the cover screen on as a real second screen. */
     var powerMode: Boolean get() = b("powerMode", false); set(v) = putB("powerMode", v)
 

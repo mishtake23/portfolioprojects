@@ -102,7 +102,7 @@ class MainActivity : ComponentActivity() {
                 rearStatus.value = message
                 if (available && prefs.autoStartCover && !prefs.coverActive && !prefs.powerMode &&
                     CursorService.instance != null
-                ) Cover.start(this@MainActivity)
+                ) startTrackpad()
             }
         })
         rear.start()
@@ -312,7 +312,7 @@ class MainActivity : ComponentActivity() {
                             Cover.stop(this@MainActivity)
                             if (prefs.powerMode) runPower(start = false)
                         } else {
-                            Cover.start(this@MainActivity)
+                            startTrackpad()
                         }
                     },
                     modifier = Modifier.fillMaxWidth().height(56.dp)
@@ -322,8 +322,11 @@ class MainActivity : ComponentActivity() {
                     Text(if (on) "Stop" else "Start on cover screen", style = MaterialTheme.typography.titleMedium)
                 }
                 Text(
-                    "Stays on while you use other apps. The cover screen may blink for a moment " +
-                        "when you switch apps.",
+                    if (PowerMode.state() == PowerMode.State.READY)
+                        "Uses power mode (Shizuku): works in every app."
+                    else
+                        "Basic mode: works while BackTouch is open. To use it in every app, set up " +
+                            "Shizuku under Advanced - Power mode.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )
@@ -332,6 +335,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** Power mode when Shizuku is ready (works in every app); otherwise basic mode. */
+    private fun startTrackpad() {
+        if (PowerMode.state() == PowerMode.State.READY) runPower(start = true)
+        else Cover.start(this)
     }
 
     /** Runs power mode start/stop off the main thread and shows its log. */
@@ -501,6 +510,15 @@ class MainActivity : ComponentActivity() {
                             ) { Text("Try the trackpad on this screen") }
                         }
                         PowerModeSection()
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        var layer by remember { mutableStateOf(prefs.keepAliveLayer) }
+                        SwitchRow(
+                            "Keep alive without Shizuku (experimental)",
+                            "Keeps an invisible BackTouch layer in front so the trackpad survives app " +
+                                "switches. On some phones this stops other apps from working - turn it " +
+                                "off if that happens.",
+                            layer
+                        ) { layer = it; prefs.keepAliveLayer = it }
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Text("Keep BackTouch switched on", style = MaterialTheme.typography.titleSmall)
                         Text(

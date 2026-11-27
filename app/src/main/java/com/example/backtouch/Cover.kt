@@ -94,7 +94,9 @@ class CoverHostActivity : Activity() {
         rear.stop()
         if (Cover.host === this) Cover.host = null
         Cover.running = false
-        if (Prefs(this).coverActive) CursorService.instance?.scheduleRelaunch()
+        val p = Prefs(this)
+        if (p.coverActive && p.keepAliveLayer) CursorService.instance?.scheduleRelaunch()
+        else if (p.coverActive) p.coverActive = false
         super.onDestroy()
     }
 }
