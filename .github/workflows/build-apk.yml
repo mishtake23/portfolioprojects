@@ -1,0 +1,42 @@
+name: Build APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build debug APK
+        run: gradle assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backtouch-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      # A fixed pre-release so the phone always downloads from the same link.
+      - name: Publish to the "debug-latest" pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: debug-latest
+          target_commitish: ${{ github.sha }}
+          name: BackTouch debug build (latest)
+          body: "Built from ${{ github.sha }}. Install app-debug.apk on the phone."
+          prerelease: true
+          files: app/build/outputs/apk/debug/app-debug.apk
