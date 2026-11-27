@@ -15,7 +15,7 @@ import android.view.accessibility.AccessibilityEvent
 
 /**
  * Draws a cursor on the DEFAULT display (the inner screen when unfolded) and
- * performs taps / scrolls at the cursor position via dispatchGesture.
+ * performs taps, long presses, scrolls and drags at the cursor via dispatchGesture.
  */
 class CursorService : AccessibilityService() {
 
@@ -26,6 +26,15 @@ class CursorService : AccessibilityService() {
     private var y = 0f
     private var w = 0
     private var h = 0
+
+    // Drag state: one long stroke built from continued segments (API 26+).
+    private var dragStroke: GestureDescription.StrokeDescription? = null
+    private var dragLastX = 0f
+    private var dragLastY = 0f
+    private var dragBusy = false
+    private var dragEnding = false
+    var isDragging = false
+        private set
 
     override fun onServiceConnected() {
         instance = this
@@ -42,6 +51,7 @@ class CursorService : AccessibilityService() {
             }
             override fun onDraw(c: Canvas) {
                 val r = width / 2f - 3f
+                fill.color = if (isDragging) Color.rgb(120, 200, 255) else Color.WHITE
                 c.drawCircle(width / 2f, height / 2f, r, fill)
                 c.drawCircle(width / 2f, height / 2f, r, ring)
             }
@@ -62,28 +72,101 @@ class CursorService : AccessibilityService() {
     private fun updateCursor() {
         lp.x = (x - lp.width / 2).toInt()
         lp.y = (y - lp.height / 2).toInt()
-        cursor?.let { wm.updateViewLayout(it, lp) }
+        cursor?.let { wm.updateViewLayout(it, lp); it.invalidate() }
+    }
+
+    fun setCursorVisible(visible: Boolean) {
+        cursor?.visibility = if (visible) View.VISIBLE else View.GONE
     }
 
     fun moveBy(dx: Float, dy: Float) {
         x = (x + dx).coerceIn(0f, (w - 1).toFloat())
         y = (y + dy).coerceIn(0f, (h - 1).toFloat())
         updateCursor()
+        if (isDragging) pumpDrag()
     }
 
     fun tap(holdMs: Long = 50) {
+        if (isDragging) return
         val p = Path().apply { moveTo(x, y) }
         dispatch(GestureDescription.StrokeDescription(p, 0, holdMs))
     }
 
     fun longPress() = tap(700)
 
-    /** Swipe starting at the cursor; dy > 0 moves content down (finger moves down). */
+    /** Swipe starting at the cursor; dy > 0 = finger moved down. */
     fun scrollBy(dy: Float) {
+        if (isDragging) return
         val endY = (y + dy).coerceIn(1f, (h - 1).toFloat())
+        if (endY == y) return
         val p = Path().apply { moveTo(x, y); lineTo(x, endY) }
         dispatch(GestureDescription.StrokeDescription(p, 0, 150))
     }
+
+    // ---- Drag ----------------------------------------------------------------
+
+    fun dragStart() {
+        if (isDragging) return
+        isDragging = true
+        dragEnding = false
+        dragLastX = x; dragLastY = y
+        val s = GestureDescription.StrokeDescription(
+            Path().apply { moveTo(x, y) }, 0, SEG_MS, true
+        )
+        dragStroke = s
+        sendDrag(s, last = false)
+        cursor?.invalidate()
+    }
+
+    fun dragEnd() {
+        if (!isDragging) return
+        dragEnding = true
+        pumpDrag()
+    }
+
+    /** Sends the next segment once the previous one finished (a new dispatch would cancel it). */
+    private fun pumpDrag() {
+        val prev = dragStroke ?: return
+        if (dragBusy) return
+        val moved = x != dragLastX || y != dragLastY
+        if (!moved && !dragEnding) return
+        val p = Path().apply {
+            moveTo(dragLastX, dragLastY)
+            if (moved) lineTo(x, y)
+        }
+        dragLastX = x; dragLastY = y
+        val s = prev.continueStroke(p, 0, SEG_MS, !dragEnding)
+        dragStroke = s
+        sendDrag(s, last = dragEnding)
+    }
+
+    private fun sendDrag(s: GestureDescription.StrokeDescription, last: Boolean) {
+        dragBusy = true
+        val ok = dispatchGesture(
+            GestureDescription.Builder().addStroke(s).build(),
+            object : GestureResultCallback() {
+                override fun onCompleted(g: GestureDescription?) {
+                    dragBusy = false
+                    if (last) resetDrag() else pumpDrag()
+                }
+                override fun onCancelled(g: GestureDescription?) {
+                    dragBusy = false
+                    resetDrag()
+                }
+            },
+            null
+        )
+        if (!ok) { dragBusy = false; resetDrag() }
+    }
+
+    private fun resetDrag() {
+        isDragging = false
+        dragEnding = false
+        dragStroke = null
+        cursor?.invalidate()
+    }
+
+    // ---------------------------------------------------------------------------
 
     private fun dispatch(s: GestureDescription.StrokeDescription) {
         dispatchGesture(GestureDescription.Builder().addStroke(s).build(), null, null)
@@ -100,6 +183,7 @@ class CursorService : AccessibilityService() {
     }
 
     companion object {
+        private const val SEG_MS = 16L
         @Volatile var instance: CursorService? = null
     }
 }
