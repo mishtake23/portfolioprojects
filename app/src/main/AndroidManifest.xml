@@ -42,7 +42,7 @@
 
         <activity
             android:name=".TrackpadActivity"
-            android:exported="false"
+            android:exported="true"
             android:resizeableActivity="true"
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density" />
 

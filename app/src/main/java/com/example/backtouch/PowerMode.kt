@@ -1,8 +1,6 @@
 package com.example.backtouch
 
-import android.app.ActivityOptions
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.view.Display
@@ -95,18 +93,18 @@ object PowerMode {
             exec("cmd device_state state reset")
             return log.toString()
         }
-        try {
-            val opts = ActivityOptions.makeBasic().setLaunchDisplayId(d.displayId)
-            ctx.startActivity(
-                Intent(ctx, TrackpadActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK),
-                opts.toBundle()
-            )
+        // Apps aren't allowed to open windows on the cover display themselves, the shell is.
+        val out = exec(
+            "am start --display ${d.displayId} -f 0x18000000 " +
+                "-n ${ctx.packageName}/${TrackpadActivity::class.java.name} --ez power true"
+        )
+        log.appendLine(out)
+        if (out.contains("Error", true) || out.contains("Exception", true)) {
+            log.appendLine("Couldn't open the trackpad on the cover screen.")
+            exec("cmd device_state state reset")
+        } else {
             log.appendLine("Trackpad opened on display ${d.displayId}.")
             Prefs(ctx).powerMode = true
-        } catch (t: Throwable) {
-            log.appendLine("Couldn't open the trackpad there: ${t.message}")
-            exec("cmd device_state state reset")
         }
         return log.toString()
     }

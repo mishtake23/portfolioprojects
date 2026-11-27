@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -106,7 +108,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        AutoEnable.tryEnable(this)
+        if (CursorService.instance == null) AutoEnable.tryEnable(this)
     }
 
     override fun onDestroy() {
@@ -161,8 +163,11 @@ class MainActivity : ComponentActivity() {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
             Column(
                 Modifier
+                    .windowInsetsPadding(WindowInsets.systemBars)   // keep content out from under the status bar
                     .verticalScroll(rememberScrollState())
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .fillMaxWidth()
+                    .wrapContentWidth(Alignment.CenterHorizontally)   // centred on the big inner screen
+                    .widthIn(max = 720.dp)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -175,13 +180,9 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                if (!serviceOn) {
-                    SetupCard()
-                } else {
-                    TrackpadCard()
-                    SettingsSections()
-                    GesturesCard()
-                }
+                if (!serviceOn) SetupCard() else TrackpadCard()
+                SettingsSections()   // always visible, even before setup
+                GesturesCard()
                 AdvancedCard(serviceOn)
                 Spacer(Modifier.height(24.dp))
             }
@@ -195,6 +196,21 @@ class MainActivity : ComponentActivity() {
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
             shape = RoundedCornerShape(28.dp)
         ) {
+            if (AutoEnable.hasPermission(this@MainActivity)) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("BackTouch is starting...", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "It's switched on in settings but hasn't started yet. If this takes more than " +
+                            "a few seconds, restart it.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Button(
+                        onClick = { AutoEnable.restart(this@MainActivity) },
+                        modifier = Modifier.fillMaxWidth().height(52.dp)
+                    ) { Text("Restart BackTouch", style = MaterialTheme.typography.titleMedium) }
+                }
+                return@Card
+            }
             Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text("One quick setup", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(

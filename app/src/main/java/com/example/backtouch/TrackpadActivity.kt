@@ -23,6 +23,22 @@ class TrackpadActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(TrackpadView(this))
     }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        closeIfMovedToMainScreen()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        closeIfMovedToMainScreen()
+    }
+
+    /** When power mode ends, Android moves this window to the main screen; close it instead. */
+    private fun closeIfMovedToMainScreen() {
+        val power = intent.getBooleanExtra("power", false)
+        if (power && display?.displayId == android.view.Display.DEFAULT_DISPLAY) finish()
+    }
 }
 
 /**
