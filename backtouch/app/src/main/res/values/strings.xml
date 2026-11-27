@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">BackTouch</string>
+    <string name="service_description">Lets the back (cover) screen act as a trackpad for the inner screen: draws a cursor and performs taps and scrolls.</string>
+</resources>
