@@ -62,6 +62,7 @@ class CoverHostActivity : Activity() {
         window.attributes = window.attributes.apply { alpha = 0f }
         rear = RearScreen(this, object : RearScreen.Listener {
             override fun onAvailability(available: Boolean, message: String) {
+                if (CursorService.instance?.folded == true) { finish(); return }
                 if (available && !requested) {
                     requested = true
                     rear.present { TrackpadView(this@CoverHostActivity) }

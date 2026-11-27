@@ -76,6 +76,9 @@ object PowerMode {
     /** Blocking. Returns a log of what happened. */
     fun start(ctx: Context): String {
         val log = StringBuilder()
+        if (CursorService.instance?.folded == true) {
+            return "Unfold your phone first - the trackpad only works unfolded."
+        }
         val states = exec("cmd device_state print-states")
         log.appendLine("States:\n$states\n")
         val parsed = parseStates(states)

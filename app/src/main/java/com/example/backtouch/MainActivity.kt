@@ -378,6 +378,8 @@ class MainActivity : ComponentActivity() {
         var opacity by remember { mutableStateOf(prefs.pointerOpacity.toFloat()) }
         var joy by remember { mutableStateOf(prefs.joystick) }
         var joySpeed by remember { mutableStateOf(prefs.joystickSpeed) }
+        var hStyle by remember { mutableStateOf(prefs.hapticStyle) }
+        var feel by remember { mutableStateOf(prefs.movementFeel) }
         val ctx = LocalContext.current
 
         Section("Pointer") {
@@ -401,6 +403,9 @@ class MainActivity : ComponentActivity() {
                 mirror = it; prefs.mirrorX = it
             }
             SwitchRow("Hide when idle", null, hide) { hide = it; prefs.autoHideCursor = it }
+            TextButton(onClick = {
+                prefs.resetPointer(); speed = prefs.sensitivity; accel = prefs.acceleration
+            }) { Text("Reset speed to default") }
         }
         Section("Joystick") {
             SwitchRow(
@@ -416,7 +421,7 @@ class MainActivity : ComponentActivity() {
         }
         Section("Scrolling") {
             SliderRow("Scroll speed", scroll, 0.5f..4f, "%.1f".format(scroll)) { scroll = it; prefs.scrollSpeed = it }
-            SwitchRow("Reverse direction", null, invert) { invert = it; prefs.invertScroll = it }
+            SwitchRow("Reverse direction", "Off: fingers down scrolls down, like a laptop", invert) { invert = it; prefs.invertScroll = it }
             SwitchRow("Classic scrolling", "Short swipes instead of a continuous finger. Try this if scrolling stops or skips", classic) {
                 classic = it; prefs.classicScroll = it
             }
@@ -424,7 +429,14 @@ class MainActivity : ComponentActivity() {
         Section("Feel") {
             Segmented("Vibration", listOf("Off", "Light", "Medium", "Strong"), vib) {
                 vib = it; prefs.haptics = it
-                Haptics(ctx).apply { level = it }.click()
+                Haptics(ctx).apply { level = it; style = hStyle }.click()
+            }
+            Segmented("Vibration style", listOf("Crisp", "Soft", "Punchy"), hStyle) {
+                hStyle = it; prefs.hapticStyle = it
+                Haptics(ctx).apply { level = vib; style = it }.rightClick()
+            }
+            SwitchRow("Feel the pointer move", "Faint ticks as the pointer travels, like a real trackpad surface", feel) {
+                feel = it; prefs.movementFeel = it
             }
             SliderRow("Ignore edges", edge, 0f..15f, "${edge.toInt()}%", steps = 14) {
                 edge = it; prefs.edgePct = it.toInt()

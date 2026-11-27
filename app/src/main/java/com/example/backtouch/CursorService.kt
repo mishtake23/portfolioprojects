@@ -7,6 +7,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.PowerManager
@@ -90,7 +94,7 @@ class CursorService : AccessibilityService() {
     }
 
     private fun checkPowerMode() {
-        if (!::prefs.isInitialized || !prefs.powerMode || powerFixing || !isUnfolded()) return
+        if (!::prefs.isInitialized || !prefs.powerMode || powerFixing || isFolded()) return
         val dm = getSystemService(DisplayManager::class.java)
         if (padDisplayId != -1 && dm.displays.any { it.displayId == padDisplayId }) return
         val now = SystemClock.uptimeMillis()
@@ -163,7 +167,7 @@ class CursorService : AccessibilityService() {
 
     private fun tryRelaunch() {
         if (!::prefs.isInitialized || !prefs.coverActive || prefs.powerMode) return
-        if (Cover.host != null || !isUnfolded()) return
+        if (Cover.host != null || isFolded()) return
         val pm = getSystemService(PowerManager::class.java)
         val km = getSystemService(KeyguardManager::class.java)
         if (!pm.isInteractive || km.isKeyguardLocked) return
@@ -226,7 +230,52 @@ class CursorService : AccessibilityService() {
         scheduleRelaunch(500)
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, handler)
         updateJoystick()
+        watchHinge()
     }
+
+    // ---- Fold detection (hinge sensor) ----
+    // Power mode forces a dual-screen state that Android keeps even after you fold the phone,
+    // so the screen size alone can't tell us. The hinge angle can.
+    @Volatile var folded: Boolean? = null
+        private set
+    private var hingeListener: SensorEventListener? = null
+
+    private fun watchHinge() {
+        val sm = getSystemService(SensorManager::class.java)
+        val sensor = sm.getDefaultSensor(Sensor.TYPE_HINGE_ANGLE) ?: return
+        val l = object : SensorEventListener {
+            override fun onSensorChanged(e: SensorEvent) {
+                val angle = e.values[0]
+                val now = when {
+                    angle < 70f -> true
+                    angle > 130f -> false
+                    else -> folded ?: false
+                }
+                if (now != folded) { folded = now; onFoldChanged(now) }
+            }
+            override fun onAccuracyChanged(s: Sensor?, accuracy: Int) {}
+        }
+        sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_NORMAL, handler)
+        hingeListener = l
+    }
+
+    /** The trackpad belongs to the unfolded phone only. */
+    private fun onFoldChanged(nowFolded: Boolean) {
+        if (nowFolded) {
+            handler.removeCallbacks(relaunchRunnable)
+            handler.removeCallbacks(powerCheck)
+            Cover.host?.finish()
+            if (prefs.powerMode) {
+                hideCoverPad()
+                Thread { PowerMode.exec("cmd device_state state reset") }.start()
+            }
+        } else {
+            scheduleRelaunch(700)
+            handler.postDelayed(powerCheck, 700)
+        }
+    }
+
+    private fun isFolded() = folded ?: !isUnfolded()
 
     // ---- Joystick on the inner screen ----
     private var joystick: JoystickView? = null
@@ -236,6 +285,7 @@ class CursorService : AccessibilityService() {
             joystick = JoystickView(this, this, prefs).also { it.attach(wm) }
         } else if (!prefs.joystick && joystick != null) {
             joystick?.detach(wm); joystick = null
+        hingeListener?.let { getSystemService(SensorManager::class.java).unregisterListener(it) }
         }
     }
 
@@ -501,6 +551,7 @@ class CursorService : AccessibilityService() {
         if (::prefs.isInitialized) prefs.unlisten(prefListener)
         hideCoverPad()
         joystick?.detach(wm); joystick = null
+        hingeListener?.let { getSystemService(SensorManager::class.java).unregisterListener(it) }
         runCatching { unregisterReceiver(screenReceiver) }
         runCatching { getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener) }
         overlay?.let { runCatching { wm.removeView(it) } }
