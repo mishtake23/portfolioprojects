@@ -79,16 +79,27 @@ class MainActivity : ComponentActivity() {
     private lateinit var rear: RearScreen
     private lateinit var prefs: Prefs
     private val rearStatus = mutableStateOf("Checking the cover screen...")
-    private val presenting = mutableStateOf(false)
+    private val available = mutableStateOf(false)
+    private val running = mutableStateOf(false)
+    private val active = mutableStateOf(false)
+    private val error = mutableStateOf<String?>(null)
+    private val powerLog = mutableStateOf("")
+    private val powerBusy = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
-        rear = RearScreen(this, { msg ->
-            rearStatus.value = msg
-            presenting.value = rear.isPresenting
-        }, autoStart = { prefs.autoStartCover && CursorService.instance != null })
+        // Only used here to know whether the cover screen can be used right now.
+        rear = RearScreen(this, object : RearScreen.Listener {
+            override fun onAvailability(available: Boolean, message: String) {
+                this@MainActivity.available.value = available
+                rearStatus.value = message
+                if (available && prefs.autoStartCover && !prefs.coverActive && !prefs.powerMode &&
+                    CursorService.instance != null
+                ) Cover.start(this@MainActivity)
+            }
+        })
         rear.start()
         setContent { BackTouchTheme { Screen() } }
     }
@@ -140,8 +151,10 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(Unit) {
             while (true) {
                 serviceOn = CursorService.instance != null
-                presenting.value = rear.isPresenting
-                delay(500)
+                running.value = Cover.running
+                active.value = prefs.coverActive || prefs.powerMode
+                error.value = Cover.lastError
+                delay(400)
             }
         }
 
@@ -250,8 +263,16 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun TrackpadCard() {
-        val running = presenting.value
+        val on = active.value
+        val showing = running.value
         var auto by remember { mutableStateOf(prefs.autoStartCover) }
+        val status = when {
+            prefs.powerMode -> "Power mode is on"
+            showing -> "Running on the cover screen"
+            on && !available.value -> "Paused - unfold your phone and it comes back"
+            on -> "Starting..."
+            else -> rearStatus.value
+        }
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
             shape = RoundedCornerShape(28.dp)
@@ -262,20 +283,62 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.width(8.dp))
                     Text("Trackpad", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 }
-                Text(rearStatus.value, style = MaterialTheme.typography.bodyMedium)
+                Text(status, style = MaterialTheme.typography.bodyMedium)
+                error.value?.let {
+                    if (!showing) Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
                 Button(
-                    onClick = { rear.toggle() },
+                    onClick = {
+                        if (on) {
+                            Cover.stop(this@MainActivity)
+                            if (prefs.powerMode) runPower(start = false)
+                        } else {
+                            Cover.start(this@MainActivity)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
-                    Icon(if (running) Icons.Filled.Close else Icons.Filled.PlayArrow, null)
+                    Icon(if (on) Icons.Filled.Close else Icons.Filled.PlayArrow, null)
                     Spacer(Modifier.width(8.dp))
-                    Text(if (running) "Stop" else "Start on cover screen", style = MaterialTheme.typography.titleMedium)
+                    Text(if (on) "Stop" else "Start on cover screen", style = MaterialTheme.typography.titleMedium)
                 }
+                Text(
+                    "Stays on while you use other apps. The cover screen may blink for a moment " +
+                        "when you switch apps.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                )
                 SwitchRow("Start automatically", "When you open BackTouch unfolded", auto) {
                     auto = it; prefs.autoStartCover = it
                 }
             }
         }
+    }
+
+    /** Runs power mode start/stop off the main thread and shows its log. */
+    private fun runPower(start: Boolean) {
+        powerBusy.value = true
+        Thread {
+            val log = if (start) {
+                Cover.stop(this) // auto-restart mode off while power mode runs
+                PowerMode.start(applicationContext)
+            } else {
+                PowerMode.stop(applicationContext)
+            }
+            runOnUiThread { powerLog.value = log; powerBusy.value = false }
+        }.start()
+    }
+
+    private fun grantViaShizuku() {
+        powerBusy.value = true
+        Thread {
+            val out = PowerMode.grantAutoEnable(applicationContext)
+            val ok = AutoEnable.tryEnable(applicationContext)
+            runOnUiThread {
+                powerLog.value = if (ok) "Done. BackTouch now switches itself back on." else "Result: $out"
+                powerBusy.value = false
+            }
+        }.start()
     }
 
     @Composable
@@ -369,6 +432,8 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxWidth()
                             ) { Text("Try the trackpad on this screen") }
                         }
+                        PowerModeSection()
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Text("Keep BackTouch switched on", style = MaterialTheme.typography.titleSmall)
                         Text(
                             if (AutoEnable.hasPermission(this@MainActivity))
@@ -383,6 +448,69 @@ class MainActivity : ComponentActivity() {
                             TextButton(onClick = { copyGrantCommand() }) { Text("Copy command") }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun PowerModeSection() {
+        var shizuku by remember { mutableStateOf(PowerMode.state()) }
+        LaunchedEffect(Unit) {
+            while (true) { shizuku = PowerMode.state(); delay(1000) }
+        }
+        Text("Power mode (Shizuku) - experimental", style = MaterialTheme.typography.titleSmall)
+        Text(
+            "Turns the cover screen on as a real second screen, so the trackpad never " +
+                "blinks when you switch apps. Needs the free Shizuku app (no root), started " +
+                "once with Wireless debugging. It may not work on every phone; the log below " +
+                "shows what happened.",
+            style = MaterialTheme.typography.bodySmall
+        )
+        when (shizuku) {
+            PowerMode.State.NOT_INSTALLED_OR_STOPPED -> {
+                Text("Shizuku isn't installed or isn't running.", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error)
+                OutlinedButton(
+                    onClick = {
+                        startActivity(Intent(Intent.ACTION_VIEW,
+                            Uri.parse("https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api")))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Get Shizuku") }
+            }
+            PowerMode.State.NEEDS_PERMISSION -> {
+                Button(onClick = { PowerMode.requestPermission() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Allow BackTouch in Shizuku")
+                }
+            }
+            PowerMode.State.READY -> {
+                val busy = powerBusy.value
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { runPower(start = !prefs.powerMode) },
+                        enabled = !busy,
+                        modifier = Modifier.weight(1f)
+                    ) { Text(if (prefs.powerMode) "Stop power mode" else "Start power mode") }
+                    OutlinedButton(onClick = { grantViaShizuku() }, enabled = !busy, modifier = Modifier.weight(1f)) {
+                        Text("Keep switched on", maxLines = 1)
+                    }
+                }
+            }
+        }
+        if (powerBusy.value) Text("Working...", style = MaterialTheme.typography.bodySmall)
+        if (powerLog.value.isNotBlank()) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(
+                        powerLog.value,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        modifier = Modifier.padding(12.dp)
+                    )
                 }
             }
         }

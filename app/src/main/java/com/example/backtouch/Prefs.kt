@@ -47,6 +47,12 @@ class Prefs(ctx: Context) {
     /** Fade the cursor out after a few seconds without movement. */
     var autoHideCursor: Boolean get() = b("autoHideCursor", true); set(v) = putB("autoHideCursor", v)
 
+    /** The user has switched the cover trackpad on (auto-restart keeps it alive). */
+    var coverActive: Boolean get() = b("coverActive", false); set(v) = putB("coverActive", v)
+
+    /** Use Shizuku to turn the cover screen on as a real second screen. */
+    var powerMode: Boolean get() = b("powerMode", false); set(v) = putB("powerMode", v)
+
     /** Put the trackpad on the cover screen as soon as the app is opened unfolded. */
     var autoStartCover: Boolean get() = b("autoStartCover", false); set(v) = putB("autoStartCover", v)
 }

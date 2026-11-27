@@ -46,6 +46,7 @@ object AutoEnable {
 /** Re-enables the service after a reboot or an app update. */
 class AutoEnableReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED) Prefs(context).coverActive = false
         AutoEnable.tryEnable(context)
     }
 }

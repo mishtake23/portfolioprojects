@@ -2,7 +2,14 @@ package com.example.backtouch
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
+import android.os.PowerManager
+import android.os.SystemClock
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Canvas
@@ -16,6 +23,8 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.widget.FrameLayout
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Draws a mouse pointer on the inner screen and turns trackpad input into real touches
@@ -57,6 +66,45 @@ class CursorService : AccessibilityService() {
     private lateinit var prefs: Prefs
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> applyPrefs() }
 
+    // ---- Auto-restart of the cover trackpad ----
+    private var suppressUntil = 0L
+    private val recentLaunches = ArrayDeque<Long>()
+    private val relaunchRunnable = Runnable { tryRelaunch() }
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) = scheduleRelaunch(600)
+    }
+
+    /** Called when the cover host closed; brings the trackpad back if the user still wants it. */
+    fun scheduleRelaunch(delayMs: Long = 700) {
+        handler.removeCallbacks(relaunchRunnable)
+        handler.postDelayed(relaunchRunnable, delayMs)
+    }
+
+    private fun isUnfolded(): Boolean {
+        val b = wm.currentWindowMetrics.bounds
+        return min(b.width(), b.height()).toFloat() / max(b.width(), b.height()) > 0.7f
+    }
+
+    private fun tryRelaunch() {
+        if (!::prefs.isInitialized || !prefs.coverActive || prefs.powerMode) return
+        if (Cover.host != null || !isUnfolded()) return
+        val pm = getSystemService(PowerManager::class.java)
+        val km = getSystemService(KeyguardManager::class.java)
+        if (!pm.isInteractive || km.isKeyguardLocked) return
+        val now = SystemClock.uptimeMillis()
+        if (now < suppressUntil) { scheduleRelaunch(suppressUntil - now + 100); return }
+        // Guard against a restart loop if the cover screen keeps refusing.
+        while (recentLaunches.isNotEmpty() && now - recentLaunches.first() > 15_000) recentLaunches.removeFirst()
+        if (recentLaunches.size >= 6) {
+            prefs.coverActive = false
+            Cover.lastError = "Stopped: the cover screen kept closing. Tap Start to try again."
+            recentLaunches.clear()
+            return
+        }
+        recentLaunches.addLast(now)
+        try { Cover.launchHost(this) } catch (_: Throwable) { }
+    }
+
     private val hideRunnable = Runnable {
         pointer?.animate()?.alpha(0f)?.setDuration(250)?.start()
     }
@@ -92,6 +140,13 @@ class CursorService : AccessibilityService() {
         wm.addView(root, lp)
         root.post { place() }
         prefs.listen(prefListener)
+        val f = IntentFilter().apply {
+            addAction(Intent.ACTION_USER_PRESENT)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenReceiver, f, RECEIVER_NOT_EXPORTED)
+        else registerReceiver(screenReceiver, f)
+        scheduleRelaunch(500)
     }
 
     private fun pointerScale() = when (prefs.pointerSize) { 0 -> 0.85f; 1 -> 1.1f; else -> 1.4f }
@@ -109,7 +164,12 @@ class CursorService : AccessibilityService() {
     fun refreshBounds() {
         if (!::wm.isInitialized) return
         val b = wm.currentWindowMetrics.bounds
-        w = b.width().coerceAtLeast(1); h = b.height().coerceAtLeast(1)
+        val nw = b.width().coerceAtLeast(1); val nh = b.height().coerceAtLeast(1)
+        if (nw != w || nh != h) {
+            // Keep the pointer at the same relative spot instead of letting it jump.
+            x = x / w * nw; y = y / h * nh
+            w = nw; h = nh
+        }
         x = x.coerceIn(0f, (w - 1).toFloat())
         y = y.coerceIn(0f, (h - 1).toFloat())
         overlay?.post { place() }
@@ -118,6 +178,7 @@ class CursorService : AccessibilityService() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         refreshBounds()
+        scheduleRelaunch(800) // unfolded again: bring the trackpad back
     }
 
     /** Moves the pointer by GPU translation only (no window relayout) -> smooth. */
@@ -177,7 +238,11 @@ class CursorService : AccessibilityService() {
 
     fun back() = performGlobalAction(GLOBAL_ACTION_BACK)
     fun home() = performGlobalAction(GLOBAL_ACTION_HOME)
-    fun recents() = performGlobalAction(GLOBAL_ACTION_RECENTS)
+    fun recents(): Boolean {
+        // Restarting the trackpad would close the Recents screen, so hold off for a while.
+        suppressUntil = SystemClock.uptimeMillis() + 8000
+        return performGlobalAction(GLOBAL_ACTION_RECENTS)
+    }
     fun notifications() = performGlobalAction(GLOBAL_ACTION_NOTIFICATIONS)
 
     // ---- Drag ----
@@ -290,6 +355,7 @@ class CursorService : AccessibilityService() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         if (::prefs.isInitialized) prefs.unlisten(prefListener)
+        runCatching { unregisterReceiver(screenReceiver) }
         overlay?.let { runCatching { wm.removeView(it) } }
         overlay = null
         pointer = null

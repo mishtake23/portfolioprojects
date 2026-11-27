@@ -19,6 +19,14 @@ choose "Allow restricted settings", and try again.
 Optional: `adb shell pm grant com.example.backtouch android.permission.WRITE_SECURE_SETTINGS`
 lets BackTouch switch itself back on after updates and reboots.
 
+## Staying on when you switch apps
+Android only keeps the cover-screen mode on while the app that started it is in front.
+- **Auto-restart (default, no setup):** an invisible, untouchable activity holds the cover-screen
+  session. When another app comes to the front the session ends; the accessibility service
+  restarts it about a second later. The cover screen may blink when you switch apps.
+- **Power mode (optional, Shizuku):** asks Android with shell rights to keep the cover screen on as
+  a real second screen and opens the trackpad there. Experimental; the app shows a log.
+
 ## How it works
 - Samsung Folds expose one logical display that switches between the inner and cover panel, so the
   trackpad is shown on the cover screen with Jetpack WindowManager's rear-display presentation API.
